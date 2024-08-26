@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package dblock
 
 import (
@@ -32,9 +34,16 @@ func newLock(db *DBLock, id string) *Lock {
 	}
 }
 
-func (l *Lock) Close() error {
-	err := l.db.Release(l)
-	return err
+func (l *Lock) ID() string {
+	return l.id
+}
+
+func (l *Lock) Acquire(failIfLocked ...bool) error {
+	return l.db.Acquire(l, failIfLocked...)
+}
+
+func (l *Lock) Release() error {
+	return l.db.Release(l)
 }
 
 func (l *Lock) IsReleased() bool {
