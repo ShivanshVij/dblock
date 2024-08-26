@@ -14,7 +14,7 @@ require (
 )
 
 require (
-	ariga.io/atlas v0.26.0 // indirect
+	ariga.io/atlas v0.26.1 // indirect
 	dario.cat/mergo v1.0.1 // indirect
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
@@ -37,7 +37,7 @@ require (
 	github.com/go-openapi/inflect v0.21.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
-	github.com/hashicorp/hcl/v2 v2.21.0 // indirect
+	github.com/hashicorp/hcl/v2 v2.22.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.1 // indirect
