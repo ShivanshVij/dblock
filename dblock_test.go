@@ -3,6 +3,7 @@ package dblock
 import (
 	"context"
 	"fmt"
+	"github.com/loopholelabs/logging"
 	"sync"
 	"testing"
 	"time"
@@ -12,8 +13,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-
-	"github.com/loopholelabs/logging"
 )
 
 const leaseDuration = time.Millisecond * 100
@@ -133,13 +132,16 @@ func TestContention(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, db.Stop()) })
 
 		l := db.Lock(t.Name())
+		t.Logf("client %d acquiring lock", client)
 		err := db.Acquire(l)
+		t.Logf("client %d acquired lock", client)
 		require.NoError(t, err)
 
 		acquired <- struct{}{}
 
-		time.Sleep(db.options.LeaseDuration * 5)
+		time.Sleep(db.options.LeaseDuration * 2)
 
+		t.Logf("client %d releasing lock", client)
 		err = db.Release(l)
 		require.NoError(t, err)
 	}
@@ -157,8 +159,8 @@ func TestContention(t *testing.T) {
 	for i := 0; i < numClients; i++ {
 		select {
 		case <-acquired:
-			//case <-time.After(leaseDuration * 2):
-			//	t.Fatal("timed out waiting for lock acquisition")
+		case <-time.After(leaseDuration * 3):
+			t.Fatal("timed out waiting for lock acquisition")
 		}
 	}
 

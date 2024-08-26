@@ -2,6 +2,7 @@ package dblock
 
 import (
 	"errors"
+	"github.com/loopholelabs/logging/loggers/noop"
 	"time"
 
 	"github.com/loopholelabs/logging/types"
@@ -34,7 +35,7 @@ type Options struct {
 
 func (o *Options) validate() error {
 	if o.Logger == nil {
-		return ErrInvalidLogger
+		o.Logger = noop.New(types.InfoLevel)
 	}
 
 	if o.Name == "" {

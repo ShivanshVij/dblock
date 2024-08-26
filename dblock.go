@@ -89,7 +89,7 @@ func New(options *Options) (*Manager, error) {
 	return &Manager{
 		logger:  logger,
 		options: options,
-		sql:     sqlClient.Debug(),
+		sql:     sqlClient,
 		ctx:     ctx,
 		cancel:  cancel,
 	}, nil
