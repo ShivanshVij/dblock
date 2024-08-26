@@ -23,6 +23,7 @@ type DBType int
 const (
 	Undefined DBType = iota
 	Postgres
+	SQLite
 )
 
 type Options struct {
@@ -43,7 +44,7 @@ func (o *Options) validate() error {
 		return ErrInvalidOwner
 	}
 
-	if o.DBType != Postgres {
+	if o.DBType != Postgres && o.DBType != SQLite {
 		return ErrInvalidDBType
 	}
 

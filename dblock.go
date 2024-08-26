@@ -13,6 +13,7 @@ import (
 	entSQL "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/loopholelabs/logging/types"
 
@@ -69,6 +70,9 @@ func New(options *Options) (*DBLock, error) {
 	case Postgres:
 		kind = dialect.Postgres
 		db, err = sql.Open("pgx", options.DatabaseURL)
+	case SQLite:
+		kind = dialect.SQLite
+		db, err = sql.Open("sqlite3", options.DatabaseURL)
 	default:
 		return nil, ErrInvalidDBType
 	}
@@ -198,7 +202,16 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 		return errors.Join(ErrNotAcquired, err)
 	}
 
-	_l, err := tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+	var _l *ent.Lock
+	switch db.options.DBType {
+	case Postgres:
+		_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+	case SQLite:
+		_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
+	default:
+		_ = tx.Rollback()
+		return ErrInvalidDBType
+	}
 	if err != nil {
 		_ = tx.Rollback()
 		return errors.Join(ErrNotAcquired, err)

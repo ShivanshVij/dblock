@@ -20,7 +20,7 @@ import (
 
 const leaseDuration = time.Millisecond * 100
 
-func setupPostgres(tb testing.TB, name ...string) *postgres.PostgresContainer {
+func setupPostgres(tb testing.TB, name ...string) *DBLock {
 	ctx := context.Background()
 
 	dbName := tb.Name()
@@ -42,12 +42,23 @@ func setupPostgres(tb testing.TB, name ...string) *postgres.PostgresContainer {
 		require.NoError(tb, err)
 	})
 
-	return pgContainer
-}
-
-func setupDB(tb testing.TB, pgContainer *postgres.PostgresContainer, name ...string) *DBLock {
 	connStr, err := pgContainer.ConnectionString(context.Background(), "sslmode=disable")
 	require.NoError(tb, err)
+
+	db, err := New(&Options{
+		Logger:        logging.Test(tb, logging.Zerolog, dbName),
+		Owner:         dbName,
+		DBType:        Postgres,
+		DatabaseURL:   connStr,
+		LeaseDuration: leaseDuration,
+	})
+	require.NoError(tb, err)
+
+	return db
+}
+
+func setupSQLite(tb testing.TB, name ...string) *DBLock {
+	connStr := fmt.Sprintf("file:%s/%s?cache=shared&_fk=1", tb.TempDir(), tb.Name())
 
 	dbName := tb.Name()
 	if len(name) > 0 && len(name[0]) > 0 {
@@ -57,160 +68,134 @@ func setupDB(tb testing.TB, pgContainer *postgres.PostgresContainer, name ...str
 	db, err := New(&Options{
 		Logger:        logging.Test(tb, logging.Zerolog, dbName),
 		Owner:         dbName,
-		DBType:        Postgres,
+		DBType:        SQLite,
 		DatabaseURL:   connStr,
 		LeaseDuration: leaseDuration,
 	})
-
 	require.NoError(tb, err)
 
 	return db
 }
 
+func testSingleWriter(db *DBLock) func(t *testing.T) {
+	return func(t *testing.T) {
+		t.Run("lost lease", func(t *testing.T) {
+			l := db.Lock(t.Name())
+			err := db.Acquire(l)
+			require.NoError(t, err)
+
+			err = db.Release(l)
+			require.NoError(t, err)
+		})
+		t.Run("version update", func(t *testing.T) {
+			l := db.Lock(t.Name())
+			err := db.Acquire(l)
+			require.NoError(t, err)
+
+			version := l.Version()
+
+			time.Sleep(db.options.LeaseDuration)
+
+			assert.NotEqual(t, version, l.Version())
+
+			err = db.Release(l)
+			require.NoError(t, err)
+		})
+
+		t.Run("race", func(t *testing.T) {
+			l := db.Lock(t.Name())
+			err := db.Acquire(l)
+			require.NoError(t, err)
+
+			var wg sync.WaitGroup
+			done := make(chan struct{})
+			wg.Add(1)
+			releaseErr := make(chan error, 1)
+			go func() {
+				defer wg.Done()
+				if err := db.Release(l); err != nil {
+					releaseErr <- err
+					return
+				}
+				close(done)
+			}()
+
+			select {
+			case err := <-releaseErr:
+				t.Fatal("unexpected error while releasing lock:", err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("deadlock between lease refresh and release")
+			case <-done:
+			}
+
+			wg.Wait()
+		})
+	}
+}
+
 func TestSingleWriter(t *testing.T) {
-	pg := setupPostgres(t)
-	db := setupDB(t, pg)
-	t.Cleanup(func() { require.NoError(t, db.Stop()) })
+	pgDB := setupPostgres(t)
+	t.Cleanup(func() { require.NoError(t, pgDB.Stop()) })
 
-	t.Run("lost lease", func(t *testing.T) {
-		l := db.Lock(t.Name())
-		err := db.Acquire(l)
-		require.NoError(t, err)
+	t.Run("postgres", testSingleWriter(pgDB))
 
-		err = db.Release(l)
-		require.NoError(t, err)
-	})
-	t.Run("version update", func(t *testing.T) {
-		l := db.Lock(t.Name())
-		err := db.Acquire(l)
-		require.NoError(t, err)
+	sqliteDB := setupSQLite(t)
+	t.Cleanup(func() { require.NoError(t, sqliteDB.Stop()) })
 
-		version := l.Version()
+	t.Run("sqlite", testSingleWriter(sqliteDB))
+}
 
-		time.Sleep(db.options.LeaseDuration)
+func testContention(db *DBLock, numClients int) func(t *testing.T) {
+	return func(t *testing.T) {
+		acquired := make(chan struct{})
+		acquire := func(client int) {
+			l := db.Lock(t.Name())
+			t.Logf("client %d acquiring lock", client)
+			err := db.Acquire(l)
+			t.Logf("client %d acquired lock", client)
+			require.NoError(t, err)
 
-		assert.NotEqual(t, version, l.Version())
+			acquired <- struct{}{}
 
-		err = db.Release(l)
-		require.NoError(t, err)
-	})
+			time.Sleep(db.options.LeaseDuration * 2)
 
-	t.Run("race", func(t *testing.T) {
-		l := db.Lock(t.Name())
-		err := db.Acquire(l)
-		require.NoError(t, err)
+			t.Logf("client %d releasing lock", client)
+			err = db.Release(l)
+			require.NoError(t, err)
+		}
 
 		var wg sync.WaitGroup
-		done := make(chan struct{})
-		wg.Add(1)
-		releaseErr := make(chan error, 1)
-		go func() {
-			defer wg.Done()
-			if err := db.Release(l); err != nil {
-				releaseErr <- err
-				return
-			}
-			close(done)
-		}()
+		for i := 0; i < numClients; i++ {
+			wg.Add(1)
+			go func(client int) {
+				defer wg.Done()
+				acquire(client)
+			}(i)
+			time.Sleep(leaseDuration)
+		}
 
-		select {
-		case err := <-releaseErr:
-			t.Fatal("unexpected error while releasing lock:", err)
-		case <-time.After(5 * time.Second):
-			t.Fatal("deadlock between lease refresh and release")
-		case <-done:
+		for i := 0; i < numClients; i++ {
+			select {
+			case <-acquired:
+			case <-time.After(leaseDuration * 3):
+				t.Fatal("timed out waiting for lock acquisition")
+			}
 		}
 
 		wg.Wait()
-	})
+	}
 }
 
-func TestContentionSingleClient(t *testing.T) {
+func TestContention(t *testing.T) {
 	const numClients = 3
-	pg := setupPostgres(t)
 
-	db := setupDB(t, pg)
-	t.Cleanup(func() { require.NoError(t, db.Stop()) })
+	pgDB := setupPostgres(t)
+	t.Cleanup(func() { require.NoError(t, pgDB.Stop()) })
 
-	acquired := make(chan struct{})
-	acquire := func(client int) {
-		l := db.Lock(t.Name())
-		t.Logf("client %d acquiring lock", client)
-		err := db.Acquire(l)
-		t.Logf("client %d acquired lock", client)
-		require.NoError(t, err)
+	t.Run("postgres", testContention(pgDB, numClients))
 
-		acquired <- struct{}{}
+	sqliteDB := setupSQLite(t)
+	t.Cleanup(func() { require.NoError(t, sqliteDB.Stop()) })
 
-		time.Sleep(db.options.LeaseDuration * 2)
-
-		t.Logf("client %d releasing lock", client)
-		err = db.Release(l)
-		require.NoError(t, err)
-	}
-
-	var wg sync.WaitGroup
-	for i := 0; i < numClients; i++ {
-		wg.Add(1)
-		go func(client int) {
-			defer wg.Done()
-			acquire(client)
-		}(i)
-		time.Sleep(leaseDuration)
-	}
-
-	for i := 0; i < numClients; i++ {
-		select {
-		case <-acquired:
-		case <-time.After(leaseDuration * 3):
-			t.Fatal("timed out waiting for lock acquisition")
-		}
-	}
-
-	wg.Wait()
-}
-
-func TestContentionSeparateClients(t *testing.T) {
-	const numClients = 3
-	pg := setupPostgres(t)
-
-	acquired := make(chan struct{})
-	acquire := func(client int) {
-		db := setupDB(t, pg, fmt.Sprintf("%s-%d", t.Name(), client))
-		defer func() { require.NoError(t, db.Stop()) }()
-
-		l := db.Lock(t.Name())
-		t.Logf("client %d acquiring lock", client)
-		err := db.Acquire(l)
-		t.Logf("client %d acquired lock", client)
-		require.NoError(t, err)
-
-		acquired <- struct{}{}
-
-		time.Sleep(db.options.LeaseDuration * 2)
-
-		t.Logf("client %d releasing lock", client)
-		err = db.Release(l)
-		require.NoError(t, err)
-	}
-
-	var wg sync.WaitGroup
-	for i := 0; i < numClients; i++ {
-		wg.Add(1)
-		go func(client int) {
-			defer wg.Done()
-			acquire(client)
-		}(i)
-		time.Sleep(leaseDuration)
-	}
-
-	for i := 0; i < numClients; i++ {
-		select {
-		case <-acquired:
-		case <-time.After(leaseDuration * 3):
-			t.Fatal("timed out waiting for lock acquisition")
-		}
-	}
-
-	wg.Wait()
+	t.Run("sqlite", testContention(sqliteDB, numClients))
 }
