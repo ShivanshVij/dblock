@@ -16,14 +16,14 @@ type Lock struct {
 // Fields of the Lock.
 func (Lock) Fields() []ent.Field {
 	return []ent.Field{
-		// The id for the Lock, immutable, globally unique
-		field.String("id").Unique().Immutable().StorageKey("id"),
+		// The name for the Lock, immutable, globally unique
+		field.String("name").Unique().Immutable(),
 
 		// The version for the Lock, optional, mutable, globally unique
-		field.UUID("version", uuid.UUID{}).Optional().Default(uuid.New).Unique().StorageKey("version"),
+		field.UUID("versionID", uuid.UUID{}).Optional().Default(uuid.New).Unique(),
 
 		// The owner for the Lock, mutable, optional
-		field.String("owner").StorageKey("owner"),
+		field.String("owner"),
 	}
 }
 

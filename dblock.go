@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sync"
 
 	"entgo.io/ent/dialect"
 	entSQL "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/loopholelabs/logging/types"
@@ -36,6 +36,10 @@ var (
 )
 
 const maxRetries = 1024
+
+var versionIsNull = entSQL.P().Append(func(b *entSQL.Builder) {
+	b.WriteString(fmt.Sprintf(`"%s"."%s" IS NULL`, lock.Table, lock.FieldVersionID))
+})
 
 type Manager struct {
 	logger  types.SubLogger
@@ -85,7 +89,7 @@ func New(options *Options) (*Manager, error) {
 	return &Manager{
 		logger:  logger,
 		options: options,
-		sql:     sqlClient,
+		sql:     sqlClient.Debug(),
 		ctx:     ctx,
 		cancel:  cancel,
 	}, nil
@@ -170,33 +174,36 @@ func (m *Manager) storeAcquire(l *Lock) error {
 		return errors.Join(ErrCreateTransaction, err)
 	}
 
+	var versionIsEQ = entSQL.P().Append(func(b *entSQL.Builder) {
+		b.WriteString(fmt.Sprintf(`"%s"."%s" = `, lock.Table, lock.FieldVersionID))
+		b.Arg(l.version)
+	})
+
 	err = tx.Lock.
 		Create().
-		SetID(l.name).
-		SetVersion(version).
+		SetName(l.name).
+		SetVersionID(version).
 		SetOwner(m.options.Name).
-		OnConflictColumns(lock.FieldID).
-		Update(func(u *ent.LockUpsert) {
-			u.
-				SetVersion(version).
-				SetOwner(m.options.Name).
-				Where(entSQL.Or(
-					entSQL.IsNull(lock.FieldVersion),
-					entSQL.EQ(lock.FieldVersion, l.version)))
-		}).Exec(ctx)
+		OnConflict(
+			entSQL.ConflictColumns(lock.FieldName),
+			entSQL.ResolveWithNewValues(),
+			entSQL.UpdateWhere(entSQL.Or(versionIsNull, versionIsEQ)),
+		).
+		UpdateNewValues().
+		Exec(ctx)
 	if err != nil {
 		_ = tx.Rollback()
 		return errors.Join(ErrNotAcquired, err)
 	}
 
-	_l, err := tx.Lock.Query().Where(lock.ID(l.name)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+	_l, err := tx.Lock.Query().Where(lock.Name(l.name)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
 	if err != nil {
 		_ = tx.Rollback()
 		return errors.Join(ErrNotAcquired, err)
 	}
 
-	if _l.Version != version {
-		l.version = _l.Version
+	if _l.VersionID != version {
+		l.version = _l.VersionID
 		_ = tx.Rollback()
 		return ErrNotAcquired
 	}
@@ -218,8 +225,8 @@ func (m *Manager) storeRelease(l *Lock) error {
 	}
 	affected, err := tx.Lock.
 		Update().
-		ClearVersion().
-		Where(lock.And(lock.ID(l.name), lock.Version(l.version))).
+		ClearVersionID().
+		Where(lock.And(lock.Name(l.name), lock.VersionID(l.version))).
 		Save(ctx)
 	if err != nil {
 		_ = tx.Rollback()
@@ -232,13 +239,13 @@ func (m *Manager) storeRelease(l *Lock) error {
 	}
 	_, err = tx.Lock.
 		Delete().
-		Where(lock.And(lock.ID(l.name), lock.VersionIsNil())).
+		Where(lock.And(lock.Name(l.name), lock.VersionIDIsNil())).
 		Exec(ctx)
 	if err != nil {
 		_ = tx.Rollback()
 		return errors.Join(ErrNotReleased, err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
 		return errors.Join(ErrCommitTransaction, err)
 	}
 	l.isReleased = true
@@ -257,16 +264,18 @@ func (m *Manager) storeLease(l *Lock) error {
 
 	affected, err := tx.Lock.
 		Update().
-		SetVersion(version).
-		Where(lock.And(lock.ID(l.name)), lock.Version(l.version)).
+		SetVersionID(version).
+		Where(lock.And(lock.Name(l.name)), lock.VersionID(l.version)).
 		Save(ctx)
 	if err != nil {
 		return errors.Join(ErrRefreshLease, err)
 	}
 	if affected == 0 {
+		m.logger.Warn().Str("lock", l.name).Msg("lease lost")
+		_ = tx.Rollback()
 		return ErrLockAlreadyReleased
 	}
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
 		return errors.Join(ErrCommitTransaction, err)
 	}
 	l.version = version

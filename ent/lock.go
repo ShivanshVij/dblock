@@ -16,9 +16,11 @@ import (
 type Lock struct {
 	config `json:"-"`
 	// ID of the ent.
-	ID string `json:"id,omitempty"`
-	// Version holds the value of the "version" field.
-	Version uuid.UUID `json:"version,omitempty"`
+	ID int `json:"id,omitempty"`
+	// Name holds the value of the "name" field.
+	Name string `json:"name,omitempty"`
+	// VersionID holds the value of the "versionID" field.
+	VersionID uuid.UUID `json:"versionID,omitempty"`
 	// Owner holds the value of the "owner" field.
 	Owner        string `json:"owner,omitempty"`
 	selectValues sql.SelectValues
@@ -29,9 +31,11 @@ func (*Lock) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case lock.FieldID, lock.FieldOwner:
+		case lock.FieldID:
+			values[i] = new(sql.NullInt64)
+		case lock.FieldName, lock.FieldOwner:
 			values[i] = new(sql.NullString)
-		case lock.FieldVersion:
+		case lock.FieldVersionID:
 			values[i] = new(uuid.UUID)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -49,16 +53,22 @@ func (l *Lock) assignValues(columns []string, values []any) error {
 	for i := range columns {
 		switch columns[i] {
 		case lock.FieldID:
-			if value, ok := values[i].(*sql.NullString); !ok {
-				return fmt.Errorf("unexpected type %T for field id", values[i])
-			} else if value.Valid {
-				l.ID = value.String
+			value, ok := values[i].(*sql.NullInt64)
+			if !ok {
+				return fmt.Errorf("unexpected type %T for field id", value)
 			}
-		case lock.FieldVersion:
+			l.ID = int(value.Int64)
+		case lock.FieldName:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field name", values[i])
+			} else if value.Valid {
+				l.Name = value.String
+			}
+		case lock.FieldVersionID:
 			if value, ok := values[i].(*uuid.UUID); !ok {
-				return fmt.Errorf("unexpected type %T for field version", values[i])
+				return fmt.Errorf("unexpected type %T for field versionID", values[i])
 			} else if value != nil {
-				l.Version = *value
+				l.VersionID = *value
 			}
 		case lock.FieldOwner:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -102,8 +112,11 @@ func (l *Lock) String() string {
 	var builder strings.Builder
 	builder.WriteString("Lock(")
 	builder.WriteString(fmt.Sprintf("id=%v, ", l.ID))
-	builder.WriteString("version=")
-	builder.WriteString(fmt.Sprintf("%v", l.Version))
+	builder.WriteString("name=")
+	builder.WriteString(l.Name)
+	builder.WriteString(", ")
+	builder.WriteString("versionID=")
+	builder.WriteString(fmt.Sprintf("%v", l.VersionID))
 	builder.WriteString(", ")
 	builder.WriteString("owner=")
 	builder.WriteString(l.Owner)

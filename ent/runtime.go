@@ -14,8 +14,8 @@ import (
 func init() {
 	lockFields := schema.Lock{}.Fields()
 	_ = lockFields
-	// lockDescVersion is the schema descriptor for version field.
-	lockDescVersion := lockFields[1].Descriptor()
-	// lock.DefaultVersion holds the default value on creation for the version field.
-	lock.DefaultVersion = lockDescVersion.Default.(func() uuid.UUID)
+	// lockDescVersionID is the schema descriptor for versionID field.
+	lockDescVersionID := lockFields[1].Descriptor()
+	// lock.DefaultVersionID holds the default value on creation for the versionID field.
+	lock.DefaultVersionID = lockDescVersionID.Default.(func() uuid.UUID)
 }

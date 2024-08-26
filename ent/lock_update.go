@@ -29,23 +29,23 @@ func (lu *LockUpdate) Where(ps ...predicate.Lock) *LockUpdate {
 	return lu
 }
 
-// SetVersion sets the "version" field.
-func (lu *LockUpdate) SetVersion(u uuid.UUID) *LockUpdate {
-	lu.mutation.SetVersion(u)
+// SetVersionID sets the "versionID" field.
+func (lu *LockUpdate) SetVersionID(u uuid.UUID) *LockUpdate {
+	lu.mutation.SetVersionID(u)
 	return lu
 }
 
-// SetNillableVersion sets the "version" field if the given value is not nil.
-func (lu *LockUpdate) SetNillableVersion(u *uuid.UUID) *LockUpdate {
+// SetNillableVersionID sets the "versionID" field if the given value is not nil.
+func (lu *LockUpdate) SetNillableVersionID(u *uuid.UUID) *LockUpdate {
 	if u != nil {
-		lu.SetVersion(*u)
+		lu.SetVersionID(*u)
 	}
 	return lu
 }
 
-// ClearVersion clears the value of the "version" field.
-func (lu *LockUpdate) ClearVersion() *LockUpdate {
-	lu.mutation.ClearVersion()
+// ClearVersionID clears the value of the "versionID" field.
+func (lu *LockUpdate) ClearVersionID() *LockUpdate {
+	lu.mutation.ClearVersionID()
 	return lu
 }
 
@@ -102,7 +102,7 @@ func (lu *LockUpdate) Modify(modifiers ...func(u *sql.UpdateBuilder)) *LockUpdat
 }
 
 func (lu *LockUpdate) sqlSave(ctx context.Context) (n int, err error) {
-	_spec := sqlgraph.NewUpdateSpec(lock.Table, lock.Columns, sqlgraph.NewFieldSpec(lock.FieldID, field.TypeString))
+	_spec := sqlgraph.NewUpdateSpec(lock.Table, lock.Columns, sqlgraph.NewFieldSpec(lock.FieldID, field.TypeInt))
 	if ps := lu.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
@@ -110,11 +110,11 @@ func (lu *LockUpdate) sqlSave(ctx context.Context) (n int, err error) {
 			}
 		}
 	}
-	if value, ok := lu.mutation.Version(); ok {
-		_spec.SetField(lock.FieldVersion, field.TypeUUID, value)
+	if value, ok := lu.mutation.VersionID(); ok {
+		_spec.SetField(lock.FieldVersionID, field.TypeUUID, value)
 	}
-	if lu.mutation.VersionCleared() {
-		_spec.ClearField(lock.FieldVersion, field.TypeUUID)
+	if lu.mutation.VersionIDCleared() {
+		_spec.ClearField(lock.FieldVersionID, field.TypeUUID)
 	}
 	if value, ok := lu.mutation.Owner(); ok {
 		_spec.SetField(lock.FieldOwner, field.TypeString, value)
@@ -141,23 +141,23 @@ type LockUpdateOne struct {
 	modifiers []func(*sql.UpdateBuilder)
 }
 
-// SetVersion sets the "version" field.
-func (luo *LockUpdateOne) SetVersion(u uuid.UUID) *LockUpdateOne {
-	luo.mutation.SetVersion(u)
+// SetVersionID sets the "versionID" field.
+func (luo *LockUpdateOne) SetVersionID(u uuid.UUID) *LockUpdateOne {
+	luo.mutation.SetVersionID(u)
 	return luo
 }
 
-// SetNillableVersion sets the "version" field if the given value is not nil.
-func (luo *LockUpdateOne) SetNillableVersion(u *uuid.UUID) *LockUpdateOne {
+// SetNillableVersionID sets the "versionID" field if the given value is not nil.
+func (luo *LockUpdateOne) SetNillableVersionID(u *uuid.UUID) *LockUpdateOne {
 	if u != nil {
-		luo.SetVersion(*u)
+		luo.SetVersionID(*u)
 	}
 	return luo
 }
 
-// ClearVersion clears the value of the "version" field.
-func (luo *LockUpdateOne) ClearVersion() *LockUpdateOne {
-	luo.mutation.ClearVersion()
+// ClearVersionID clears the value of the "versionID" field.
+func (luo *LockUpdateOne) ClearVersionID() *LockUpdateOne {
+	luo.mutation.ClearVersionID()
 	return luo
 }
 
@@ -227,7 +227,7 @@ func (luo *LockUpdateOne) Modify(modifiers ...func(u *sql.UpdateBuilder)) *LockU
 }
 
 func (luo *LockUpdateOne) sqlSave(ctx context.Context) (_node *Lock, err error) {
-	_spec := sqlgraph.NewUpdateSpec(lock.Table, lock.Columns, sqlgraph.NewFieldSpec(lock.FieldID, field.TypeString))
+	_spec := sqlgraph.NewUpdateSpec(lock.Table, lock.Columns, sqlgraph.NewFieldSpec(lock.FieldID, field.TypeInt))
 	id, ok := luo.mutation.ID()
 	if !ok {
 		return nil, &ValidationError{Name: "id", err: errors.New(`ent: missing "Lock.id" for update`)}
@@ -252,11 +252,11 @@ func (luo *LockUpdateOne) sqlSave(ctx context.Context) (_node *Lock, err error) 
 			}
 		}
 	}
-	if value, ok := luo.mutation.Version(); ok {
-		_spec.SetField(lock.FieldVersion, field.TypeUUID, value)
+	if value, ok := luo.mutation.VersionID(); ok {
+		_spec.SetField(lock.FieldVersionID, field.TypeUUID, value)
 	}
-	if luo.mutation.VersionCleared() {
-		_spec.ClearField(lock.FieldVersion, field.TypeUUID)
+	if luo.mutation.VersionIDCleared() {
+		_spec.ClearField(lock.FieldVersionID, field.TypeUUID)
 	}
 	if value, ok := luo.mutation.Owner(); ok {
 		_spec.SetField(lock.FieldOwner, field.TypeString, value)

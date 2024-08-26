@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 
-	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
@@ -23,16 +22,22 @@ type LockCreate struct {
 	conflict []sql.ConflictOption
 }
 
-// SetVersion sets the "version" field.
-func (lc *LockCreate) SetVersion(u uuid.UUID) *LockCreate {
-	lc.mutation.SetVersion(u)
+// SetName sets the "name" field.
+func (lc *LockCreate) SetName(s string) *LockCreate {
+	lc.mutation.SetName(s)
 	return lc
 }
 
-// SetNillableVersion sets the "version" field if the given value is not nil.
-func (lc *LockCreate) SetNillableVersion(u *uuid.UUID) *LockCreate {
+// SetVersionID sets the "versionID" field.
+func (lc *LockCreate) SetVersionID(u uuid.UUID) *LockCreate {
+	lc.mutation.SetVersionID(u)
+	return lc
+}
+
+// SetNillableVersionID sets the "versionID" field if the given value is not nil.
+func (lc *LockCreate) SetNillableVersionID(u *uuid.UUID) *LockCreate {
 	if u != nil {
-		lc.SetVersion(*u)
+		lc.SetVersionID(*u)
 	}
 	return lc
 }
@@ -40,12 +45,6 @@ func (lc *LockCreate) SetNillableVersion(u *uuid.UUID) *LockCreate {
 // SetOwner sets the "owner" field.
 func (lc *LockCreate) SetOwner(s string) *LockCreate {
 	lc.mutation.SetOwner(s)
-	return lc
-}
-
-// SetID sets the "id" field.
-func (lc *LockCreate) SetID(s string) *LockCreate {
-	lc.mutation.SetID(s)
 	return lc
 }
 
@@ -84,14 +83,17 @@ func (lc *LockCreate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (lc *LockCreate) defaults() {
-	if _, ok := lc.mutation.Version(); !ok {
-		v := lock.DefaultVersion()
-		lc.mutation.SetVersion(v)
+	if _, ok := lc.mutation.VersionID(); !ok {
+		v := lock.DefaultVersionID()
+		lc.mutation.SetVersionID(v)
 	}
 }
 
 // check runs all checks and user-defined validators on the builder.
 func (lc *LockCreate) check() error {
+	if _, ok := lc.mutation.Name(); !ok {
+		return &ValidationError{Name: "name", err: errors.New(`ent: missing required field "Lock.name"`)}
+	}
 	if _, ok := lc.mutation.Owner(); !ok {
 		return &ValidationError{Name: "owner", err: errors.New(`ent: missing required field "Lock.owner"`)}
 	}
@@ -109,13 +111,8 @@ func (lc *LockCreate) sqlSave(ctx context.Context) (*Lock, error) {
 		}
 		return nil, err
 	}
-	if _spec.ID.Value != nil {
-		if id, ok := _spec.ID.Value.(string); ok {
-			_node.ID = id
-		} else {
-			return nil, fmt.Errorf("unexpected Lock.ID type: %T", _spec.ID.Value)
-		}
-	}
+	id := _spec.ID.Value.(int64)
+	_node.ID = int(id)
 	lc.mutation.id = &_node.ID
 	lc.mutation.done = true
 	return _node, nil
@@ -124,16 +121,16 @@ func (lc *LockCreate) sqlSave(ctx context.Context) (*Lock, error) {
 func (lc *LockCreate) createSpec() (*Lock, *sqlgraph.CreateSpec) {
 	var (
 		_node = &Lock{config: lc.config}
-		_spec = sqlgraph.NewCreateSpec(lock.Table, sqlgraph.NewFieldSpec(lock.FieldID, field.TypeString))
+		_spec = sqlgraph.NewCreateSpec(lock.Table, sqlgraph.NewFieldSpec(lock.FieldID, field.TypeInt))
 	)
 	_spec.OnConflict = lc.conflict
-	if id, ok := lc.mutation.ID(); ok {
-		_node.ID = id
-		_spec.ID.Value = id
+	if value, ok := lc.mutation.Name(); ok {
+		_spec.SetField(lock.FieldName, field.TypeString, value)
+		_node.Name = value
 	}
-	if value, ok := lc.mutation.Version(); ok {
-		_spec.SetField(lock.FieldVersion, field.TypeUUID, value)
-		_node.Version = value
+	if value, ok := lc.mutation.VersionID(); ok {
+		_spec.SetField(lock.FieldVersionID, field.TypeUUID, value)
+		_node.VersionID = value
 	}
 	if value, ok := lc.mutation.Owner(); ok {
 		_spec.SetField(lock.FieldOwner, field.TypeString, value)
@@ -146,7 +143,7 @@ func (lc *LockCreate) createSpec() (*Lock, *sqlgraph.CreateSpec) {
 // of the `INSERT` statement. For example:
 //
 //	client.Lock.Create().
-//		SetVersion(v).
+//		SetName(v).
 //		OnConflict(
 //			// Update the row with the new values
 //			// the was proposed for insertion.
@@ -155,7 +152,7 @@ func (lc *LockCreate) createSpec() (*Lock, *sqlgraph.CreateSpec) {
 //		// Override some of the fields with custom
 //		// update values.
 //		Update(func(u *ent.LockUpsert) {
-//			SetVersion(v+v).
+//			SetName(v+v).
 //		}).
 //		Exec(ctx)
 func (lc *LockCreate) OnConflict(opts ...sql.ConflictOption) *LockUpsertOne {
@@ -191,21 +188,21 @@ type (
 	}
 )
 
-// SetVersion sets the "version" field.
-func (u *LockUpsert) SetVersion(v uuid.UUID) *LockUpsert {
-	u.Set(lock.FieldVersion, v)
+// SetVersionID sets the "versionID" field.
+func (u *LockUpsert) SetVersionID(v uuid.UUID) *LockUpsert {
+	u.Set(lock.FieldVersionID, v)
 	return u
 }
 
-// UpdateVersion sets the "version" field to the value that was provided on create.
-func (u *LockUpsert) UpdateVersion() *LockUpsert {
-	u.SetExcluded(lock.FieldVersion)
+// UpdateVersionID sets the "versionID" field to the value that was provided on create.
+func (u *LockUpsert) UpdateVersionID() *LockUpsert {
+	u.SetExcluded(lock.FieldVersionID)
 	return u
 }
 
-// ClearVersion clears the value of the "version" field.
-func (u *LockUpsert) ClearVersion() *LockUpsert {
-	u.SetNull(lock.FieldVersion)
+// ClearVersionID clears the value of the "versionID" field.
+func (u *LockUpsert) ClearVersionID() *LockUpsert {
+	u.SetNull(lock.FieldVersionID)
 	return u
 }
 
@@ -221,22 +218,19 @@ func (u *LockUpsert) UpdateOwner() *LockUpsert {
 	return u
 }
 
-// UpdateNewValues updates the mutable fields using the new values that were set on create except the ID field.
+// UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
 //	client.Lock.Create().
 //		OnConflict(
 //			sql.ResolveWithNewValues(),
-//			sql.ResolveWith(func(u *sql.UpdateSet) {
-//				u.SetIgnore(lock.FieldID)
-//			}),
 //		).
 //		Exec(ctx)
 func (u *LockUpsertOne) UpdateNewValues() *LockUpsertOne {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWithNewValues())
 	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
-		if _, exists := u.create.mutation.ID(); exists {
-			s.SetIgnore(lock.FieldID)
+		if _, exists := u.create.mutation.Name(); exists {
+			s.SetIgnore(lock.FieldName)
 		}
 	}))
 	return u
@@ -269,24 +263,24 @@ func (u *LockUpsertOne) Update(set func(*LockUpsert)) *LockUpsertOne {
 	return u
 }
 
-// SetVersion sets the "version" field.
-func (u *LockUpsertOne) SetVersion(v uuid.UUID) *LockUpsertOne {
+// SetVersionID sets the "versionID" field.
+func (u *LockUpsertOne) SetVersionID(v uuid.UUID) *LockUpsertOne {
 	return u.Update(func(s *LockUpsert) {
-		s.SetVersion(v)
+		s.SetVersionID(v)
 	})
 }
 
-// UpdateVersion sets the "version" field to the value that was provided on create.
-func (u *LockUpsertOne) UpdateVersion() *LockUpsertOne {
+// UpdateVersionID sets the "versionID" field to the value that was provided on create.
+func (u *LockUpsertOne) UpdateVersionID() *LockUpsertOne {
 	return u.Update(func(s *LockUpsert) {
-		s.UpdateVersion()
+		s.UpdateVersionID()
 	})
 }
 
-// ClearVersion clears the value of the "version" field.
-func (u *LockUpsertOne) ClearVersion() *LockUpsertOne {
+// ClearVersionID clears the value of the "versionID" field.
+func (u *LockUpsertOne) ClearVersionID() *LockUpsertOne {
 	return u.Update(func(s *LockUpsert) {
-		s.ClearVersion()
+		s.ClearVersionID()
 	})
 }
 
@@ -320,12 +314,7 @@ func (u *LockUpsertOne) ExecX(ctx context.Context) {
 }
 
 // Exec executes the UPSERT query and returns the inserted/updated ID.
-func (u *LockUpsertOne) ID(ctx context.Context) (id string, err error) {
-	if u.create.driver.Dialect() == dialect.MySQL {
-		// In case of "ON CONFLICT", there is no way to get back non-numeric ID
-		// fields from the database since MySQL does not support the RETURNING clause.
-		return id, errors.New("ent: LockUpsertOne.ID is not supported by MySQL driver. Use LockUpsertOne.Exec instead")
-	}
+func (u *LockUpsertOne) ID(ctx context.Context) (id int, err error) {
 	node, err := u.create.Save(ctx)
 	if err != nil {
 		return id, err
@@ -334,7 +323,7 @@ func (u *LockUpsertOne) ID(ctx context.Context) (id string, err error) {
 }
 
 // IDX is like ID, but panics if an error occurs.
-func (u *LockUpsertOne) IDX(ctx context.Context) string {
+func (u *LockUpsertOne) IDX(ctx context.Context) int {
 	id, err := u.ID(ctx)
 	if err != nil {
 		panic(err)
@@ -389,6 +378,10 @@ func (lcb *LockCreateBulk) Save(ctx context.Context) ([]*Lock, error) {
 					return nil, err
 				}
 				mutation.id = &nodes[i].ID
+				if specs[i].ID.Value != nil {
+					id := specs[i].ID.Value.(int64)
+					nodes[i].ID = int(id)
+				}
 				mutation.done = true
 				return nodes[i], nil
 			})
@@ -440,7 +433,7 @@ func (lcb *LockCreateBulk) ExecX(ctx context.Context) {
 //		// Override some of the fields with custom
 //		// update values.
 //		Update(func(u *ent.LockUpsert) {
-//			SetVersion(v+v).
+//			SetName(v+v).
 //		}).
 //		Exec(ctx)
 func (lcb *LockCreateBulk) OnConflict(opts ...sql.ConflictOption) *LockUpsertBulk {
@@ -475,17 +468,14 @@ type LockUpsertBulk struct {
 //	client.Lock.Create().
 //		OnConflict(
 //			sql.ResolveWithNewValues(),
-//			sql.ResolveWith(func(u *sql.UpdateSet) {
-//				u.SetIgnore(lock.FieldID)
-//			}),
 //		).
 //		Exec(ctx)
 func (u *LockUpsertBulk) UpdateNewValues() *LockUpsertBulk {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWithNewValues())
 	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
 		for _, b := range u.create.builders {
-			if _, exists := b.mutation.ID(); exists {
-				s.SetIgnore(lock.FieldID)
+			if _, exists := b.mutation.Name(); exists {
+				s.SetIgnore(lock.FieldName)
 			}
 		}
 	}))
@@ -519,24 +509,24 @@ func (u *LockUpsertBulk) Update(set func(*LockUpsert)) *LockUpsertBulk {
 	return u
 }
 
-// SetVersion sets the "version" field.
-func (u *LockUpsertBulk) SetVersion(v uuid.UUID) *LockUpsertBulk {
+// SetVersionID sets the "versionID" field.
+func (u *LockUpsertBulk) SetVersionID(v uuid.UUID) *LockUpsertBulk {
 	return u.Update(func(s *LockUpsert) {
-		s.SetVersion(v)
+		s.SetVersionID(v)
 	})
 }
 
-// UpdateVersion sets the "version" field to the value that was provided on create.
-func (u *LockUpsertBulk) UpdateVersion() *LockUpsertBulk {
+// UpdateVersionID sets the "versionID" field to the value that was provided on create.
+func (u *LockUpsertBulk) UpdateVersionID() *LockUpsertBulk {
 	return u.Update(func(s *LockUpsert) {
-		s.UpdateVersion()
+		s.UpdateVersionID()
 	})
 }
 
-// ClearVersion clears the value of the "version" field.
-func (u *LockUpsertBulk) ClearVersion() *LockUpsertBulk {
+// ClearVersionID clears the value of the "versionID" field.
+func (u *LockUpsertBulk) ClearVersionID() *LockUpsertBulk {
 	return u.Update(func(s *LockUpsert) {
-		s.ClearVersion()
+		s.ClearVersionID()
 	})
 }
 

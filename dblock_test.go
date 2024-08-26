@@ -2,24 +2,32 @@ package dblock
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
-	"github.com/testcontainers/testcontainers-go"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/loopholelabs/logging"
 )
 
-func setupPostgres(tb testing.TB) *Manager {
+const leaseDuration = time.Millisecond * 100
+
+func setupPostgres(tb testing.TB, name ...string) *postgres.PostgresContainer {
 	ctx := context.Background()
 
+	dbName := tb.Name()
+	if len(name) > 0 && len(name[0]) > 0 {
+		dbName = name[0]
+	}
+
 	pgContainer, err := postgres.Run(ctx, "postgres:15.3-alpine",
-		postgres.WithDatabase(tb.Name()),
+		postgres.WithDatabase(dbName),
 		postgres.WithUsername("postgres"),
 		postgres.WithPassword("postgres"),
 		testcontainers.WithWaitStrategy(
@@ -32,24 +40,34 @@ func setupPostgres(tb testing.TB) *Manager {
 		require.NoError(tb, err)
 	})
 
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	return pgContainer
+}
+
+func setupDB(tb testing.TB, pgContainer *postgres.PostgresContainer, name ...string) *Manager {
+	connStr, err := pgContainer.ConnectionString(context.Background(), "sslmode=disable")
 	require.NoError(tb, err)
 
-	m, err := New(&Options{
-		Logger:        logging.Test(tb, logging.Zerolog, tb.Name()),
-		Name:          tb.Name(),
+	dbName := tb.Name()
+	if len(name) > 0 && len(name[0]) > 0 {
+		dbName = name[0]
+	}
+
+	db, err := New(&Options{
+		Logger:        logging.Test(tb, logging.Zerolog, dbName),
+		Name:          dbName,
 		DBType:        Postgres,
 		DatabaseURL:   connStr,
-		LeaseDuration: time.Millisecond * 100,
+		LeaseDuration: leaseDuration,
 	})
 
 	require.NoError(tb, err)
 
-	return m
+	return db
 }
 
-func TestPostgres(t *testing.T) {
-	db := setupPostgres(t)
+func TestSingleWriter(t *testing.T) {
+	pg := setupPostgres(t)
+	db := setupDB(t, pg)
 	t.Cleanup(func() { require.NoError(t, db.Stop()) })
 
 	t.Run("lost lease", func(t *testing.T) {
@@ -103,4 +121,46 @@ func TestPostgres(t *testing.T) {
 
 		wg.Wait()
 	})
+}
+
+func TestContention(t *testing.T) {
+	const numClients = 3
+	pg := setupPostgres(t)
+
+	acquired := make(chan struct{})
+	acquire := func(client int) {
+		db := setupDB(t, pg, fmt.Sprintf("%s-%d", t.Name(), client))
+		t.Cleanup(func() { require.NoError(t, db.Stop()) })
+
+		l := db.Lock(t.Name())
+		err := db.Acquire(l)
+		require.NoError(t, err)
+
+		acquired <- struct{}{}
+
+		time.Sleep(db.options.LeaseDuration * 5)
+
+		err = db.Release(l)
+		require.NoError(t, err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < numClients; i++ {
+		wg.Add(1)
+		go func(client int) {
+			defer wg.Done()
+			acquire(client)
+		}(i)
+		time.Sleep(leaseDuration)
+	}
+
+	for i := 0; i < numClients; i++ {
+		select {
+		case <-acquired:
+			//case <-time.After(leaseDuration * 2):
+			//	t.Fatal("timed out waiting for lock acquisition")
+		}
+	}
+
+	wg.Wait()
 }

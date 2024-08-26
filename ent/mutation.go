@@ -32,8 +32,9 @@ type LockMutation struct {
 	config
 	op            Op
 	typ           string
-	id            *string
-	version       *uuid.UUID
+	id            *int
+	name          *string
+	versionID     *uuid.UUID
 	owner         *string
 	clearedFields map[string]struct{}
 	done          bool
@@ -61,7 +62,7 @@ func newLockMutation(c config, op Op, opts ...lockOption) *LockMutation {
 }
 
 // withLockID sets the ID field of the mutation.
-func withLockID(id string) lockOption {
+func withLockID(id int) lockOption {
 	return func(m *LockMutation) {
 		var (
 			err   error
@@ -111,15 +112,9 @@ func (m LockMutation) Tx() (*Tx, error) {
 	return tx, nil
 }
 
-// SetID sets the value of the id field. Note that this
-// operation is only accepted on creation of Lock entities.
-func (m *LockMutation) SetID(id string) {
-	m.id = &id
-}
-
 // ID returns the ID value in the mutation. Note that the ID is only available
 // if it was provided to the builder or after it was returned from the database.
-func (m *LockMutation) ID() (id string, exists bool) {
+func (m *LockMutation) ID() (id int, exists bool) {
 	if m.id == nil {
 		return
 	}
@@ -130,12 +125,12 @@ func (m *LockMutation) ID() (id string, exists bool) {
 // That means, if the mutation is applied within a transaction with an isolation level such
 // as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
 // or updated by the mutation.
-func (m *LockMutation) IDs(ctx context.Context) ([]string, error) {
+func (m *LockMutation) IDs(ctx context.Context) ([]int, error) {
 	switch {
 	case m.op.Is(OpUpdateOne | OpDeleteOne):
 		id, exists := m.ID()
 		if exists {
-			return []string{id}, nil
+			return []int{id}, nil
 		}
 		fallthrough
 	case m.op.Is(OpUpdate | OpDelete):
@@ -145,53 +140,89 @@ func (m *LockMutation) IDs(ctx context.Context) ([]string, error) {
 	}
 }
 
-// SetVersion sets the "version" field.
-func (m *LockMutation) SetVersion(u uuid.UUID) {
-	m.version = &u
+// SetName sets the "name" field.
+func (m *LockMutation) SetName(s string) {
+	m.name = &s
 }
 
-// Version returns the value of the "version" field in the mutation.
-func (m *LockMutation) Version() (r uuid.UUID, exists bool) {
-	v := m.version
+// Name returns the value of the "name" field in the mutation.
+func (m *LockMutation) Name() (r string, exists bool) {
+	v := m.name
 	if v == nil {
 		return
 	}
 	return *v, true
 }
 
-// OldVersion returns the old "version" field's value of the Lock entity.
+// OldName returns the old "name" field's value of the Lock entity.
 // If the Lock object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *LockMutation) OldVersion(ctx context.Context) (v uuid.UUID, err error) {
+func (m *LockMutation) OldName(ctx context.Context) (v string, err error) {
 	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldVersion is only allowed on UpdateOne operations")
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
 	}
 	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldVersion requires an ID field in the mutation")
+		return v, errors.New("OldName requires an ID field in the mutation")
 	}
 	oldValue, err := m.oldValue(ctx)
 	if err != nil {
-		return v, fmt.Errorf("querying old value for OldVersion: %w", err)
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
 	}
-	return oldValue.Version, nil
+	return oldValue.Name, nil
 }
 
-// ClearVersion clears the value of the "version" field.
-func (m *LockMutation) ClearVersion() {
-	m.version = nil
-	m.clearedFields[lock.FieldVersion] = struct{}{}
+// ResetName resets all changes to the "name" field.
+func (m *LockMutation) ResetName() {
+	m.name = nil
 }
 
-// VersionCleared returns if the "version" field was cleared in this mutation.
-func (m *LockMutation) VersionCleared() bool {
-	_, ok := m.clearedFields[lock.FieldVersion]
+// SetVersionID sets the "versionID" field.
+func (m *LockMutation) SetVersionID(u uuid.UUID) {
+	m.versionID = &u
+}
+
+// VersionID returns the value of the "versionID" field in the mutation.
+func (m *LockMutation) VersionID() (r uuid.UUID, exists bool) {
+	v := m.versionID
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldVersionID returns the old "versionID" field's value of the Lock entity.
+// If the Lock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *LockMutation) OldVersionID(ctx context.Context) (v uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldVersionID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldVersionID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldVersionID: %w", err)
+	}
+	return oldValue.VersionID, nil
+}
+
+// ClearVersionID clears the value of the "versionID" field.
+func (m *LockMutation) ClearVersionID() {
+	m.versionID = nil
+	m.clearedFields[lock.FieldVersionID] = struct{}{}
+}
+
+// VersionIDCleared returns if the "versionID" field was cleared in this mutation.
+func (m *LockMutation) VersionIDCleared() bool {
+	_, ok := m.clearedFields[lock.FieldVersionID]
 	return ok
 }
 
-// ResetVersion resets all changes to the "version" field.
-func (m *LockMutation) ResetVersion() {
-	m.version = nil
-	delete(m.clearedFields, lock.FieldVersion)
+// ResetVersionID resets all changes to the "versionID" field.
+func (m *LockMutation) ResetVersionID() {
+	m.versionID = nil
+	delete(m.clearedFields, lock.FieldVersionID)
 }
 
 // SetOwner sets the "owner" field.
@@ -264,9 +295,12 @@ func (m *LockMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *LockMutation) Fields() []string {
-	fields := make([]string, 0, 2)
-	if m.version != nil {
-		fields = append(fields, lock.FieldVersion)
+	fields := make([]string, 0, 3)
+	if m.name != nil {
+		fields = append(fields, lock.FieldName)
+	}
+	if m.versionID != nil {
+		fields = append(fields, lock.FieldVersionID)
 	}
 	if m.owner != nil {
 		fields = append(fields, lock.FieldOwner)
@@ -279,8 +313,10 @@ func (m *LockMutation) Fields() []string {
 // schema.
 func (m *LockMutation) Field(name string) (ent.Value, bool) {
 	switch name {
-	case lock.FieldVersion:
-		return m.Version()
+	case lock.FieldName:
+		return m.Name()
+	case lock.FieldVersionID:
+		return m.VersionID()
 	case lock.FieldOwner:
 		return m.Owner()
 	}
@@ -292,8 +328,10 @@ func (m *LockMutation) Field(name string) (ent.Value, bool) {
 // database failed.
 func (m *LockMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
 	switch name {
-	case lock.FieldVersion:
-		return m.OldVersion(ctx)
+	case lock.FieldName:
+		return m.OldName(ctx)
+	case lock.FieldVersionID:
+		return m.OldVersionID(ctx)
 	case lock.FieldOwner:
 		return m.OldOwner(ctx)
 	}
@@ -305,12 +343,19 @@ func (m *LockMutation) OldField(ctx context.Context, name string) (ent.Value, er
 // type.
 func (m *LockMutation) SetField(name string, value ent.Value) error {
 	switch name {
-	case lock.FieldVersion:
+	case lock.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case lock.FieldVersionID:
 		v, ok := value.(uuid.UUID)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
-		m.SetVersion(v)
+		m.SetVersionID(v)
 		return nil
 	case lock.FieldOwner:
 		v, ok := value.(string)
@@ -349,8 +394,8 @@ func (m *LockMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *LockMutation) ClearedFields() []string {
 	var fields []string
-	if m.FieldCleared(lock.FieldVersion) {
-		fields = append(fields, lock.FieldVersion)
+	if m.FieldCleared(lock.FieldVersionID) {
+		fields = append(fields, lock.FieldVersionID)
 	}
 	return fields
 }
@@ -366,8 +411,8 @@ func (m *LockMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *LockMutation) ClearField(name string) error {
 	switch name {
-	case lock.FieldVersion:
-		m.ClearVersion()
+	case lock.FieldVersionID:
+		m.ClearVersionID()
 		return nil
 	}
 	return fmt.Errorf("unknown Lock nullable field %s", name)
@@ -377,8 +422,11 @@ func (m *LockMutation) ClearField(name string) error {
 // It returns an error if the field is not defined in the schema.
 func (m *LockMutation) ResetField(name string) error {
 	switch name {
-	case lock.FieldVersion:
-		m.ResetVersion()
+	case lock.FieldName:
+		m.ResetName()
+		return nil
+	case lock.FieldVersionID:
+		m.ResetVersionID()
 		return nil
 	case lock.FieldOwner:
 		m.ResetOwner()
