@@ -10,7 +10,7 @@ import (
 
 var (
 	ErrInvalidLogger                = errors.New("invalid logger")
-	ErrInvalidName                  = errors.New("invalid name")
+	ErrInvalidOwner                 = errors.New("invalid owner")
 	ErrInvalidDBType                = errors.New("invalid database type")
 	ErrInvalidDatabaseURL           = errors.New("invalid database URL")
 	ErrInvalidLeaseDuration         = errors.New("invalid lease duration")
@@ -26,7 +26,7 @@ const (
 
 type Options struct {
 	Logger                types.SubLogger
-	Name                  string
+	Owner                 string
 	DBType                DBType
 	DatabaseURL           string
 	LeaseDuration         time.Duration
@@ -38,8 +38,8 @@ func (o *Options) validate() error {
 		o.Logger = noop.New(types.InfoLevel)
 	}
 
-	if o.Name == "" {
-		return ErrInvalidName
+	if o.Owner == "" {
+		return ErrInvalidOwner
 	}
 
 	if o.DBType != Postgres {

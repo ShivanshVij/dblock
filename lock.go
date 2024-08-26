@@ -8,8 +8,8 @@ import (
 )
 
 type Lock struct {
-	manager *Manager
-	name    string
+	manager *DBLock
+	id      string
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -22,24 +22,21 @@ type Lock struct {
 	isReleased bool
 }
 
-func newLock(manager *Manager, name string) *Lock {
+func newLock(manager *DBLock, id string) *Lock {
 	ctx, cancel := context.WithCancel(manager.ctx)
 	return &Lock{
 		manager: manager,
-		name:    name,
+		id:      id,
 		ctx:     ctx,
 		cancel:  cancel,
 	}
 }
 
-// Close releases the lock and interrupts the locks heartbeat, if configured.
 func (l *Lock) Close() error {
 	err := l.manager.Release(l)
 	return err
 }
 
-// IsReleased indicates whether the lock is either released or lost after
-// heartbeat.
 func (l *Lock) IsReleased() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -83,8 +83,8 @@ func (lq *LockQuery) FirstX(ctx context.Context) *Lock {
 
 // FirstID returns the first Lock ID from the query.
 // Returns a *NotFoundError when no Lock ID was found.
-func (lq *LockQuery) FirstID(ctx context.Context) (id int, err error) {
-	var ids []int
+func (lq *LockQuery) FirstID(ctx context.Context) (id string, err error) {
+	var ids []string
 	if ids, err = lq.Limit(1).IDs(setContextOp(ctx, lq.ctx, ent.OpQueryFirstID)); err != nil {
 		return
 	}
@@ -96,7 +96,7 @@ func (lq *LockQuery) FirstID(ctx context.Context) (id int, err error) {
 }
 
 // FirstIDX is like FirstID, but panics if an error occurs.
-func (lq *LockQuery) FirstIDX(ctx context.Context) int {
+func (lq *LockQuery) FirstIDX(ctx context.Context) string {
 	id, err := lq.FirstID(ctx)
 	if err != nil && !IsNotFound(err) {
 		panic(err)
@@ -134,8 +134,8 @@ func (lq *LockQuery) OnlyX(ctx context.Context) *Lock {
 // OnlyID is like Only, but returns the only Lock ID in the query.
 // Returns a *NotSingularError when more than one Lock ID is found.
 // Returns a *NotFoundError when no entities are found.
-func (lq *LockQuery) OnlyID(ctx context.Context) (id int, err error) {
-	var ids []int
+func (lq *LockQuery) OnlyID(ctx context.Context) (id string, err error) {
+	var ids []string
 	if ids, err = lq.Limit(2).IDs(setContextOp(ctx, lq.ctx, ent.OpQueryOnlyID)); err != nil {
 		return
 	}
@@ -151,7 +151,7 @@ func (lq *LockQuery) OnlyID(ctx context.Context) (id int, err error) {
 }
 
 // OnlyIDX is like OnlyID, but panics if an error occurs.
-func (lq *LockQuery) OnlyIDX(ctx context.Context) int {
+func (lq *LockQuery) OnlyIDX(ctx context.Context) string {
 	id, err := lq.OnlyID(ctx)
 	if err != nil {
 		panic(err)
@@ -179,7 +179,7 @@ func (lq *LockQuery) AllX(ctx context.Context) []*Lock {
 }
 
 // IDs executes the query and returns a list of Lock IDs.
-func (lq *LockQuery) IDs(ctx context.Context) (ids []int, err error) {
+func (lq *LockQuery) IDs(ctx context.Context) (ids []string, err error) {
 	if lq.ctx.Unique == nil && lq.path != nil {
 		lq.Unique(true)
 	}
@@ -191,7 +191,7 @@ func (lq *LockQuery) IDs(ctx context.Context) (ids []int, err error) {
 }
 
 // IDsX is like IDs, but panics if an error occurs.
-func (lq *LockQuery) IDsX(ctx context.Context) []int {
+func (lq *LockQuery) IDsX(ctx context.Context) []string {
 	ids, err := lq.IDs(ctx)
 	if err != nil {
 		panic(err)
@@ -264,12 +264,12 @@ func (lq *LockQuery) Clone() *LockQuery {
 // Example:
 //
 //	var v []struct {
-//		Name string `json:"name,omitempty"`
+//		Version uuid.UUID `json:"version,omitempty"`
 //		Count int `json:"count,omitempty"`
 //	}
 //
 //	client.Lock.Query().
-//		GroupBy(lock.FieldName).
+//		GroupBy(lock.FieldVersion).
 //		Aggregate(ent.Count()).
 //		Scan(ctx, &v)
 func (lq *LockQuery) GroupBy(field string, fields ...string) *LockGroupBy {
@@ -287,11 +287,11 @@ func (lq *LockQuery) GroupBy(field string, fields ...string) *LockGroupBy {
 // Example:
 //
 //	var v []struct {
-//		Name string `json:"name,omitempty"`
+//		Version uuid.UUID `json:"version,omitempty"`
 //	}
 //
 //	client.Lock.Query().
-//		Select(lock.FieldName).
+//		Select(lock.FieldVersion).
 //		Scan(ctx, &v)
 func (lq *LockQuery) Select(fields ...string) *LockSelect {
 	lq.ctx.Fields = append(lq.ctx.Fields, fields...)
@@ -373,7 +373,7 @@ func (lq *LockQuery) sqlCount(ctx context.Context) (int, error) {
 }
 
 func (lq *LockQuery) querySpec() *sqlgraph.QuerySpec {
-	_spec := sqlgraph.NewQuerySpec(lock.Table, lock.Columns, sqlgraph.NewFieldSpec(lock.FieldID, field.TypeInt))
+	_spec := sqlgraph.NewQuerySpec(lock.Table, lock.Columns, sqlgraph.NewFieldSpec(lock.FieldID, field.TypeString))
 	_spec.From = lq.sql
 	if unique := lq.ctx.Unique; unique != nil {
 		_spec.Unique = *unique

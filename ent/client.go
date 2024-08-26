@@ -15,8 +15,6 @@ import (
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"github.com/shivanshvij/dblock/ent/lock"
-
-	stdsql "database/sql"
 )
 
 // Client is the client that holds all ent builders.
@@ -259,7 +257,7 @@ func (c *LockClient) UpdateOne(l *Lock) *LockUpdateOne {
 }
 
 // UpdateOneID returns an update builder for the given id.
-func (c *LockClient) UpdateOneID(id int) *LockUpdateOne {
+func (c *LockClient) UpdateOneID(id string) *LockUpdateOne {
 	mutation := newLockMutation(c.config, OpUpdateOne, withLockID(id))
 	return &LockUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
 }
@@ -276,7 +274,7 @@ func (c *LockClient) DeleteOne(l *Lock) *LockDeleteOne {
 }
 
 // DeleteOneID returns a builder for deleting the given entity by its id.
-func (c *LockClient) DeleteOneID(id int) *LockDeleteOne {
+func (c *LockClient) DeleteOneID(id string) *LockDeleteOne {
 	builder := c.Delete().Where(lock.ID(id))
 	builder.mutation.id = &id
 	builder.mutation.op = OpDeleteOne
@@ -293,12 +291,12 @@ func (c *LockClient) Query() *LockQuery {
 }
 
 // Get returns a Lock entity by its id.
-func (c *LockClient) Get(ctx context.Context, id int) (*Lock, error) {
+func (c *LockClient) Get(ctx context.Context, id string) (*Lock, error) {
 	return c.Query().Where(lock.ID(id)).Only(ctx)
 }
 
 // GetX is like Get, but panics if an error occurs.
-func (c *LockClient) GetX(ctx context.Context, id int) *Lock {
+func (c *LockClient) GetX(ctx context.Context, id string) *Lock {
 	obj, err := c.Get(ctx, id)
 	if err != nil {
 		panic(err)
@@ -340,27 +338,3 @@ type (
 		Lock []ent.Interceptor
 	}
 )
-
-// ExecContext allows calling the underlying ExecContext method of the driver if it is supported by it.
-// See, database/sql#DB.ExecContext for more information.
-func (c *config) ExecContext(ctx context.Context, query string, args ...any) (stdsql.Result, error) {
-	ex, ok := c.driver.(interface {
-		ExecContext(context.Context, string, ...any) (stdsql.Result, error)
-	})
-	if !ok {
-		return nil, fmt.Errorf("Driver.ExecContext is not supported")
-	}
-	return ex.ExecContext(ctx, query, args...)
-}
-
-// QueryContext allows calling the underlying QueryContext method of the driver if it is supported by it.
-// See, database/sql#DB.QueryContext for more information.
-func (c *config) QueryContext(ctx context.Context, query string, args ...any) (*stdsql.Rows, error) {
-	q, ok := c.driver.(interface {
-		QueryContext(context.Context, string, ...any) (*stdsql.Rows, error)
-	})
-	if !ok {
-		return nil, fmt.Errorf("Driver.QueryContext is not supported")
-	}
-	return q.QueryContext(ctx, query, args...)
-}

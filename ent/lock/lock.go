@@ -12,10 +12,8 @@ const (
 	Label = "lock"
 	// FieldID holds the string denoting the id field in the database.
 	FieldID = "id"
-	// FieldName holds the string denoting the name field in the database.
-	FieldName = "name"
-	// FieldVersionID holds the string denoting the versionid field in the database.
-	FieldVersionID = "version_id"
+	// FieldVersion holds the string denoting the version field in the database.
+	FieldVersion = "version"
 	// FieldOwner holds the string denoting the owner field in the database.
 	FieldOwner = "owner"
 	// Table holds the table name of the lock in the database.
@@ -25,8 +23,7 @@ const (
 // Columns holds all SQL columns for lock fields.
 var Columns = []string{
 	FieldID,
-	FieldName,
-	FieldVersionID,
+	FieldVersion,
 	FieldOwner,
 }
 
@@ -41,8 +38,8 @@ func ValidColumn(column string) bool {
 }
 
 var (
-	// DefaultVersionID holds the default value on creation for the "versionID" field.
-	DefaultVersionID func() uuid.UUID
+	// DefaultVersion holds the default value on creation for the "version" field.
+	DefaultVersion func() uuid.UUID
 )
 
 // OrderOption defines the ordering options for the Lock queries.
@@ -53,14 +50,9 @@ func ByID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldID, opts...).ToFunc()
 }
 
-// ByName orders the results by the name field.
-func ByName(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldName, opts...).ToFunc()
-}
-
-// ByVersionID orders the results by the versionID field.
-func ByVersionID(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldVersionID, opts...).ToFunc()
+// ByVersion orders the results by the version field.
+func ByVersion(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldVersion, opts...).ToFunc()
 }
 
 // ByOwner orders the results by the owner field.

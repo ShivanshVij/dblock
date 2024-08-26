@@ -9,58 +9,63 @@ import (
 )
 
 // ID filters vertices based on their ID field.
-func ID(id int) predicate.Lock {
+func ID(id string) predicate.Lock {
 	return predicate.Lock(sql.FieldEQ(FieldID, id))
 }
 
 // IDEQ applies the EQ predicate on the ID field.
-func IDEQ(id int) predicate.Lock {
+func IDEQ(id string) predicate.Lock {
 	return predicate.Lock(sql.FieldEQ(FieldID, id))
 }
 
 // IDNEQ applies the NEQ predicate on the ID field.
-func IDNEQ(id int) predicate.Lock {
+func IDNEQ(id string) predicate.Lock {
 	return predicate.Lock(sql.FieldNEQ(FieldID, id))
 }
 
 // IDIn applies the In predicate on the ID field.
-func IDIn(ids ...int) predicate.Lock {
+func IDIn(ids ...string) predicate.Lock {
 	return predicate.Lock(sql.FieldIn(FieldID, ids...))
 }
 
 // IDNotIn applies the NotIn predicate on the ID field.
-func IDNotIn(ids ...int) predicate.Lock {
+func IDNotIn(ids ...string) predicate.Lock {
 	return predicate.Lock(sql.FieldNotIn(FieldID, ids...))
 }
 
 // IDGT applies the GT predicate on the ID field.
-func IDGT(id int) predicate.Lock {
+func IDGT(id string) predicate.Lock {
 	return predicate.Lock(sql.FieldGT(FieldID, id))
 }
 
 // IDGTE applies the GTE predicate on the ID field.
-func IDGTE(id int) predicate.Lock {
+func IDGTE(id string) predicate.Lock {
 	return predicate.Lock(sql.FieldGTE(FieldID, id))
 }
 
 // IDLT applies the LT predicate on the ID field.
-func IDLT(id int) predicate.Lock {
+func IDLT(id string) predicate.Lock {
 	return predicate.Lock(sql.FieldLT(FieldID, id))
 }
 
 // IDLTE applies the LTE predicate on the ID field.
-func IDLTE(id int) predicate.Lock {
+func IDLTE(id string) predicate.Lock {
 	return predicate.Lock(sql.FieldLTE(FieldID, id))
 }
 
-// Name applies equality check predicate on the "name" field. It's identical to NameEQ.
-func Name(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldEQ(FieldName, v))
+// IDEqualFold applies the EqualFold predicate on the ID field.
+func IDEqualFold(id string) predicate.Lock {
+	return predicate.Lock(sql.FieldEqualFold(FieldID, id))
 }
 
-// VersionID applies equality check predicate on the "versionID" field. It's identical to VersionIDEQ.
-func VersionID(v uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldEQ(FieldVersionID, v))
+// IDContainsFold applies the ContainsFold predicate on the ID field.
+func IDContainsFold(id string) predicate.Lock {
+	return predicate.Lock(sql.FieldContainsFold(FieldID, id))
+}
+
+// Version applies equality check predicate on the "version" field. It's identical to VersionEQ.
+func Version(v uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldEQ(FieldVersion, v))
 }
 
 // Owner applies equality check predicate on the "owner" field. It's identical to OwnerEQ.
@@ -68,119 +73,54 @@ func Owner(v string) predicate.Lock {
 	return predicate.Lock(sql.FieldEQ(FieldOwner, v))
 }
 
-// NameEQ applies the EQ predicate on the "name" field.
-func NameEQ(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldEQ(FieldName, v))
+// VersionEQ applies the EQ predicate on the "version" field.
+func VersionEQ(v uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldEQ(FieldVersion, v))
 }
 
-// NameNEQ applies the NEQ predicate on the "name" field.
-func NameNEQ(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldNEQ(FieldName, v))
+// VersionNEQ applies the NEQ predicate on the "version" field.
+func VersionNEQ(v uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldNEQ(FieldVersion, v))
 }
 
-// NameIn applies the In predicate on the "name" field.
-func NameIn(vs ...string) predicate.Lock {
-	return predicate.Lock(sql.FieldIn(FieldName, vs...))
+// VersionIn applies the In predicate on the "version" field.
+func VersionIn(vs ...uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldIn(FieldVersion, vs...))
 }
 
-// NameNotIn applies the NotIn predicate on the "name" field.
-func NameNotIn(vs ...string) predicate.Lock {
-	return predicate.Lock(sql.FieldNotIn(FieldName, vs...))
+// VersionNotIn applies the NotIn predicate on the "version" field.
+func VersionNotIn(vs ...uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldNotIn(FieldVersion, vs...))
 }
 
-// NameGT applies the GT predicate on the "name" field.
-func NameGT(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldGT(FieldName, v))
+// VersionGT applies the GT predicate on the "version" field.
+func VersionGT(v uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldGT(FieldVersion, v))
 }
 
-// NameGTE applies the GTE predicate on the "name" field.
-func NameGTE(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldGTE(FieldName, v))
+// VersionGTE applies the GTE predicate on the "version" field.
+func VersionGTE(v uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldGTE(FieldVersion, v))
 }
 
-// NameLT applies the LT predicate on the "name" field.
-func NameLT(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldLT(FieldName, v))
+// VersionLT applies the LT predicate on the "version" field.
+func VersionLT(v uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldLT(FieldVersion, v))
 }
 
-// NameLTE applies the LTE predicate on the "name" field.
-func NameLTE(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldLTE(FieldName, v))
+// VersionLTE applies the LTE predicate on the "version" field.
+func VersionLTE(v uuid.UUID) predicate.Lock {
+	return predicate.Lock(sql.FieldLTE(FieldVersion, v))
 }
 
-// NameContains applies the Contains predicate on the "name" field.
-func NameContains(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldContains(FieldName, v))
+// VersionIsNil applies the IsNil predicate on the "version" field.
+func VersionIsNil() predicate.Lock {
+	return predicate.Lock(sql.FieldIsNull(FieldVersion))
 }
 
-// NameHasPrefix applies the HasPrefix predicate on the "name" field.
-func NameHasPrefix(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldHasPrefix(FieldName, v))
-}
-
-// NameHasSuffix applies the HasSuffix predicate on the "name" field.
-func NameHasSuffix(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldHasSuffix(FieldName, v))
-}
-
-// NameEqualFold applies the EqualFold predicate on the "name" field.
-func NameEqualFold(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldEqualFold(FieldName, v))
-}
-
-// NameContainsFold applies the ContainsFold predicate on the "name" field.
-func NameContainsFold(v string) predicate.Lock {
-	return predicate.Lock(sql.FieldContainsFold(FieldName, v))
-}
-
-// VersionIDEQ applies the EQ predicate on the "versionID" field.
-func VersionIDEQ(v uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldEQ(FieldVersionID, v))
-}
-
-// VersionIDNEQ applies the NEQ predicate on the "versionID" field.
-func VersionIDNEQ(v uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldNEQ(FieldVersionID, v))
-}
-
-// VersionIDIn applies the In predicate on the "versionID" field.
-func VersionIDIn(vs ...uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldIn(FieldVersionID, vs...))
-}
-
-// VersionIDNotIn applies the NotIn predicate on the "versionID" field.
-func VersionIDNotIn(vs ...uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldNotIn(FieldVersionID, vs...))
-}
-
-// VersionIDGT applies the GT predicate on the "versionID" field.
-func VersionIDGT(v uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldGT(FieldVersionID, v))
-}
-
-// VersionIDGTE applies the GTE predicate on the "versionID" field.
-func VersionIDGTE(v uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldGTE(FieldVersionID, v))
-}
-
-// VersionIDLT applies the LT predicate on the "versionID" field.
-func VersionIDLT(v uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldLT(FieldVersionID, v))
-}
-
-// VersionIDLTE applies the LTE predicate on the "versionID" field.
-func VersionIDLTE(v uuid.UUID) predicate.Lock {
-	return predicate.Lock(sql.FieldLTE(FieldVersionID, v))
-}
-
-// VersionIDIsNil applies the IsNil predicate on the "versionID" field.
-func VersionIDIsNil() predicate.Lock {
-	return predicate.Lock(sql.FieldIsNull(FieldVersionID))
-}
-
-// VersionIDNotNil applies the NotNil predicate on the "versionID" field.
-func VersionIDNotNil() predicate.Lock {
-	return predicate.Lock(sql.FieldNotNull(FieldVersionID))
+// VersionNotNil applies the NotNil predicate on the "version" field.
+func VersionNotNil() predicate.Lock {
+	return predicate.Lock(sql.FieldNotNull(FieldVersion))
 }
 
 // OwnerEQ applies the EQ predicate on the "owner" field.

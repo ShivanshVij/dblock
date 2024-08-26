@@ -11,9 +11,8 @@ import (
 var (
 	// DblockColumns holds the columns for the "dblock" table.
 	DblockColumns = []*schema.Column{
-		{Name: "id", Type: field.TypeInt, Increment: true},
-		{Name: "name", Type: field.TypeString, Unique: true},
-		{Name: "version_id", Type: field.TypeUUID, Unique: true, Nullable: true},
+		{Name: "id", Type: field.TypeString, Unique: true},
+		{Name: "version", Type: field.TypeUUID, Unique: true, Nullable: true},
 		{Name: "owner", Type: field.TypeString},
 	}
 	// DblockTable holds the schema information for the "dblock" table.

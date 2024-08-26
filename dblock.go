@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package dblock
 
 import (
@@ -38,10 +40,10 @@ var (
 const maxRetries = 1024
 
 var versionIsNull = entSQL.P().Append(func(b *entSQL.Builder) {
-	b.WriteString(fmt.Sprintf(`"%s"."%s" IS NULL`, lock.Table, lock.FieldVersionID))
+	b.WriteString(fmt.Sprintf(`"%s"."%s" IS NULL`, lock.Table, lock.FieldVersion))
 })
 
-type Manager struct {
+type DBLock struct {
 	logger  types.SubLogger
 	options *Options
 
@@ -52,13 +54,13 @@ type Manager struct {
 	wg     sync.WaitGroup
 }
 
-func New(options *Options) (*Manager, error) {
+func New(options *Options) (*DBLock, error) {
 	var err error
 	if err = options.validate(); err != nil {
 		return nil, errors.Join(ErrInvalidOptions, err)
 	}
 
-	logger := options.Logger.SubLogger("dblock").With().Str("name", options.Name).Logger()
+	logger := options.Logger.SubLogger("dblock").With().Str("owner", options.Owner).Logger()
 	logger.Debug().Msg("connecting to database")
 
 	var db *sql.DB
@@ -77,16 +79,16 @@ func New(options *Options) (*Manager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	sqlClient := ent.NewClient(ent.Driver(entSQL.OpenDB(kind, db)))
-	logger.Info().Msg("running database migrations")
+	logger.Debug().Msg("running database migrations")
 	err = sqlClient.Schema.Create(ctx)
 	if err != nil {
 		cancel()
 		_ = sqlClient.Close()
 		return nil, errors.Join(ErrRunningMigrations, err)
 	}
-	logger.Info().Msg("database migrations complete")
+	logger.Debug().Msg("database migrations complete")
 
-	return &Manager{
+	return &DBLock{
 		logger:  logger,
 		options: options,
 		sql:     sqlClient,
@@ -95,11 +97,11 @@ func New(options *Options) (*Manager, error) {
 	}, nil
 }
 
-func (m *Manager) Lock(name string) *Lock {
-	return newLock(m, name)
+func (m *DBLock) Lock(id string) *Lock {
+	return newLock(m, id)
 }
 
-func (m *Manager) Acquire(l *Lock, failIfLocked ...bool) error {
+func (m *DBLock) Acquire(l *Lock, failIfLocked ...bool) error {
 	var err error
 	for {
 		if err = l.ctx.Err(); err != nil {
@@ -119,14 +121,14 @@ func (m *Manager) Acquire(l *Lock, failIfLocked ...bool) error {
 	}
 }
 
-func (m *Manager) Release(l *Lock) error {
+func (m *DBLock) Release(l *Lock) error {
 	l.cancel()
 	l.wg.Wait()
 	err := m.try(m.ctx, func() error { return m.storeRelease(l) })
 	return err
 }
 
-func (m *Manager) Stop() error {
+func (m *DBLock) Stop() error {
 	m.cancel()
 	m.wg.Wait()
 	err := m.sql.Close()
@@ -136,7 +138,7 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
-func (m *Manager) tryAcquire(l *Lock) error {
+func (m *DBLock) tryAcquire(l *Lock) error {
 	err := m.storeAcquire(l)
 	if err != nil {
 		return err
@@ -147,23 +149,23 @@ func (m *Manager) tryAcquire(l *Lock) error {
 		defer l.cancel()
 		defer l.wg.Done()
 		defer m.wg.Done()
-		defer m.logger.Debug().Str("lock", l.name).Msg("lease refresh stopped")
-		m.logger.Debug().Str("lock", l.name).Msg("lease refresh started")
+		defer m.logger.Debug().Str("lock", l.id).Msg("lease refresh stopped")
+		m.logger.Debug().Str("lock", l.id).Msg("lease refresh started")
 		for {
 			if err := m.leashRefresh(l); err != nil {
-				m.logger.Error().Err(err).Str("lock", l.name).Msg("lease refresh failed")
+				m.logger.Error().Err(err).Str("lock", l.id).Msg("lease refresh failed")
 				return
 			} else if err := l.ctx.Err(); err != nil {
 				return
 			}
-			m.logger.Debug().Str("lock", l.name).Msg("lease refreshed")
+			m.logger.Debug().Str("lock", l.id).Msg("lease refreshed")
 			utils.Wait(l.ctx, m.options.LeaseRefreshFrequency)
 		}
 	}()
 	return nil
 }
 
-func (m *Manager) storeAcquire(l *Lock) error {
+func (m *DBLock) storeAcquire(l *Lock) error {
 	ctx, cancel := context.WithTimeout(l.ctx, m.options.LeaseDuration)
 	defer cancel()
 
@@ -175,17 +177,17 @@ func (m *Manager) storeAcquire(l *Lock) error {
 	}
 
 	var versionIsEQ = entSQL.P().Append(func(b *entSQL.Builder) {
-		b.WriteString(fmt.Sprintf(`"%s"."%s" = `, lock.Table, lock.FieldVersionID))
+		b.WriteString(fmt.Sprintf(`"%s"."%s" = `, lock.Table, lock.FieldVersion))
 		b.Arg(l.version)
 	})
 
 	err = tx.Lock.
 		Create().
-		SetName(l.name).
-		SetVersionID(version).
-		SetOwner(m.options.Name).
+		SetID(l.id).
+		SetVersion(version).
+		SetOwner(m.options.Owner).
 		OnConflict(
-			entSQL.ConflictColumns(lock.FieldName),
+			entSQL.ConflictColumns(lock.FieldID),
 			entSQL.ResolveWithNewValues(),
 			entSQL.UpdateWhere(entSQL.Or(versionIsNull, versionIsEQ)),
 		).
@@ -196,14 +198,14 @@ func (m *Manager) storeAcquire(l *Lock) error {
 		return errors.Join(ErrNotAcquired, err)
 	}
 
-	_l, err := tx.Lock.Query().Where(lock.Name(l.name)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+	_l, err := tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
 	if err != nil {
 		_ = tx.Rollback()
 		return errors.Join(ErrNotAcquired, err)
 	}
 
-	if _l.VersionID != version {
-		l.version = _l.VersionID
+	if _l.Version != version {
+		l.version = _l.Version
 		_ = tx.Rollback()
 		return ErrNotAcquired
 	}
@@ -214,7 +216,7 @@ func (m *Manager) storeAcquire(l *Lock) error {
 	return nil
 }
 
-func (m *Manager) storeRelease(l *Lock) error {
+func (m *DBLock) storeRelease(l *Lock) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	ctx, cancel := context.WithTimeout(m.ctx, m.options.LeaseDuration)
@@ -225,8 +227,8 @@ func (m *Manager) storeRelease(l *Lock) error {
 	}
 	affected, err := tx.Lock.
 		Update().
-		ClearVersionID().
-		Where(lock.And(lock.Name(l.name), lock.VersionID(l.version))).
+		ClearVersion().
+		Where(lock.And(lock.IDEQ(l.id), lock.Version(l.version))).
 		Save(ctx)
 	if err != nil {
 		_ = tx.Rollback()
@@ -239,7 +241,7 @@ func (m *Manager) storeRelease(l *Lock) error {
 	}
 	_, err = tx.Lock.
 		Delete().
-		Where(lock.And(lock.Name(l.name), lock.VersionIDIsNil())).
+		Where(lock.And(lock.ID(l.id), lock.VersionIsNil())).
 		Exec(ctx)
 	if err != nil {
 		_ = tx.Rollback()
@@ -253,10 +255,11 @@ func (m *Manager) storeRelease(l *Lock) error {
 	return nil
 }
 
-func (m *Manager) storeLease(l *Lock) error {
+func (m *DBLock) storeLease(l *Lock) error {
 	ctx, cancel := context.WithTimeout(l.ctx, m.options.LeaseDuration)
 	defer cancel()
 	version := uuid.New()
+
 	tx, err := m.sql.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return errors.Join(ErrCreateTransaction, err)
@@ -264,14 +267,15 @@ func (m *Manager) storeLease(l *Lock) error {
 
 	affected, err := tx.Lock.
 		Update().
-		SetVersionID(version).
-		Where(lock.And(lock.Name(l.name)), lock.VersionID(l.version)).
+		SetVersion(version).
+		Where(lock.And(lock.ID(l.id)), lock.Version(l.version)).
 		Save(ctx)
 	if err != nil {
+		_ = tx.Rollback()
 		return errors.Join(ErrRefreshLease, err)
 	}
 	if affected == 0 {
-		m.logger.Warn().Str("lock", l.name).Msg("lease lost")
+		m.logger.Warn().Str("lock", l.id).Msg("lease lost")
 		_ = tx.Rollback()
 		return ErrLockAlreadyReleased
 	}
@@ -282,7 +286,7 @@ func (m *Manager) storeLease(l *Lock) error {
 	return nil
 }
 
-func (m *Manager) leashRefresh(l *Lock) error {
+func (m *DBLock) leashRefresh(l *Lock) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.isReleased {
@@ -296,7 +300,7 @@ func (m *Manager) leashRefresh(l *Lock) error {
 	return nil
 }
 
-func (m *Manager) try(ctx context.Context, do func() error) error {
+func (m *DBLock) try(ctx context.Context, do func() error) error {
 	retryPeriod := m.options.LeaseRefreshFrequency
 	var err error
 	for i := 0; i < maxRetries; i++ {

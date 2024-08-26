@@ -3,7 +3,6 @@ package dblock
 import (
 	"context"
 	"fmt"
-	"github.com/loopholelabs/logging"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +12,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/loopholelabs/logging"
 )
 
 const leaseDuration = time.Millisecond * 100
@@ -42,7 +43,7 @@ func setupPostgres(tb testing.TB, name ...string) *postgres.PostgresContainer {
 	return pgContainer
 }
 
-func setupDB(tb testing.TB, pgContainer *postgres.PostgresContainer, name ...string) *Manager {
+func setupDB(tb testing.TB, pgContainer *postgres.PostgresContainer, name ...string) *DBLock {
 	connStr, err := pgContainer.ConnectionString(context.Background(), "sslmode=disable")
 	require.NoError(tb, err)
 
@@ -53,7 +54,7 @@ func setupDB(tb testing.TB, pgContainer *postgres.PostgresContainer, name ...str
 
 	db, err := New(&Options{
 		Logger:        logging.Test(tb, logging.Zerolog, dbName),
-		Name:          dbName,
+		Owner:         dbName,
 		DBType:        Postgres,
 		DatabaseURL:   connStr,
 		LeaseDuration: leaseDuration,

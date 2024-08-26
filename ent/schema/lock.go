@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package schema
 
 import (
@@ -16,11 +18,11 @@ type Lock struct {
 // Fields of the Lock.
 func (Lock) Fields() []ent.Field {
 	return []ent.Field{
-		// The name for the Lock, immutable, globally unique
-		field.String("name").Unique().Immutable(),
+		// The id for the Lock, immutable, globally unique
+		field.String("id").Unique().Immutable().StorageKey("id"),
 
 		// The version for the Lock, optional, mutable, globally unique
-		field.UUID("versionID", uuid.UUID{}).Optional().Default(uuid.New).Unique(),
+		field.UUID("version", uuid.UUID{}).Optional().Default(uuid.New).Unique(),
 
 		// The owner for the Lock, mutable, optional
 		field.String("owner"),
