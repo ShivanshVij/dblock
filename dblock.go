@@ -97,22 +97,22 @@ func New(options *Options) (*DBLock, error) {
 	}, nil
 }
 
-func (m *DBLock) Lock(id string) *Lock {
-	return newLock(m, id)
+func (db *DBLock) Lock(id string) *Lock {
+	return newLock(db, id)
 }
 
-func (m *DBLock) Acquire(l *Lock, failIfLocked ...bool) error {
+func (db *DBLock) Acquire(l *Lock, failIfLocked ...bool) error {
 	var err error
 	for {
 		if err = l.ctx.Err(); err != nil {
 			return ErrNotAcquired
 		}
-		err = m.try(l.ctx, func() error { return m.tryAcquire(l) })
+		err = db.try(l.ctx, func() error { return db.tryAcquire(l) })
 		switch {
 		case len(failIfLocked) > 0 && failIfLocked[0] && errors.Is(err, ErrNotAcquired):
 			return err
 		case errors.Is(err, ErrNotAcquired):
-			utils.Wait(l.ctx, m.options.LeaseDuration)
+			utils.Wait(l.ctx, db.options.LeaseDuration)
 			continue
 		case err != nil:
 			return err
@@ -121,57 +121,57 @@ func (m *DBLock) Acquire(l *Lock, failIfLocked ...bool) error {
 	}
 }
 
-func (m *DBLock) Release(l *Lock) error {
+func (db *DBLock) Release(l *Lock) error {
 	l.cancel()
 	l.wg.Wait()
-	err := m.try(m.ctx, func() error { return m.storeRelease(l) })
+	err := db.try(db.ctx, func() error { return db.storeRelease(l) })
 	return err
 }
 
-func (m *DBLock) Stop() error {
-	m.cancel()
-	m.wg.Wait()
-	err := m.sql.Close()
+func (db *DBLock) Stop() error {
+	db.cancel()
+	db.wg.Wait()
+	err := db.sql.Close()
 	if err != nil {
 		return errors.Join(ErrClosingDatabase, err)
 	}
 	return nil
 }
 
-func (m *DBLock) tryAcquire(l *Lock) error {
-	err := m.storeAcquire(l)
+func (db *DBLock) tryAcquire(l *Lock) error {
+	err := db.storeAcquire(l)
 	if err != nil {
 		return err
 	}
 	l.wg.Add(1)
-	m.wg.Add(1)
+	db.wg.Add(1)
 	go func() {
 		defer l.cancel()
 		defer l.wg.Done()
-		defer m.wg.Done()
-		defer m.logger.Debug().Str("lock", l.id).Msg("lease refresh stopped")
-		m.logger.Debug().Str("lock", l.id).Msg("lease refresh started")
+		defer db.wg.Done()
+		defer db.logger.Debug().Str("lock", l.id).Msg("lease refresh stopped")
+		db.logger.Debug().Str("lock", l.id).Msg("lease refresh started")
 		for {
-			if err := m.leashRefresh(l); err != nil {
-				m.logger.Error().Err(err).Str("lock", l.id).Msg("lease refresh failed")
+			if err := db.leaseRefresh(l); err != nil {
+				db.logger.Error().Err(err).Str("lock", l.id).Msg("lease refresh failed")
 				return
 			} else if err := l.ctx.Err(); err != nil {
 				return
 			}
-			m.logger.Debug().Str("lock", l.id).Msg("lease refreshed")
-			utils.Wait(l.ctx, m.options.LeaseRefreshFrequency)
+			db.logger.Debug().Str("lock", l.id).Msg("lease refreshed")
+			utils.Wait(l.ctx, db.options.LeaseRefreshFrequency)
 		}
 	}()
 	return nil
 }
 
-func (m *DBLock) storeAcquire(l *Lock) error {
-	ctx, cancel := context.WithTimeout(l.ctx, m.options.LeaseDuration)
+func (db *DBLock) storeAcquire(l *Lock) error {
+	ctx, cancel := context.WithTimeout(l.ctx, db.options.LeaseDuration)
 	defer cancel()
 
 	version := uuid.New()
 
-	tx, err := m.sql.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := db.sql.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return errors.Join(ErrCreateTransaction, err)
 	}
@@ -185,7 +185,7 @@ func (m *DBLock) storeAcquire(l *Lock) error {
 		Create().
 		SetID(l.id).
 		SetVersion(version).
-		SetOwner(m.options.Owner).
+		SetOwner(db.options.Owner).
 		OnConflict(
 			entSQL.ConflictColumns(lock.FieldID),
 			entSQL.ResolveWithNewValues(),
@@ -216,12 +216,12 @@ func (m *DBLock) storeAcquire(l *Lock) error {
 	return nil
 }
 
-func (m *DBLock) storeRelease(l *Lock) error {
+func (db *DBLock) storeRelease(l *Lock) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	ctx, cancel := context.WithTimeout(m.ctx, m.options.LeaseDuration)
+	ctx, cancel := context.WithTimeout(db.ctx, db.options.LeaseDuration)
 	defer cancel()
-	tx, err := m.sql.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := db.sql.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return errors.Join(ErrCreateTransaction, err)
 	}
@@ -255,12 +255,12 @@ func (m *DBLock) storeRelease(l *Lock) error {
 	return nil
 }
 
-func (m *DBLock) storeLease(l *Lock) error {
-	ctx, cancel := context.WithTimeout(l.ctx, m.options.LeaseDuration)
+func (db *DBLock) storeLease(l *Lock) error {
+	ctx, cancel := context.WithTimeout(l.ctx, db.options.LeaseDuration)
 	defer cancel()
 	version := uuid.New()
 
-	tx, err := m.sql.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := db.sql.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return errors.Join(ErrCreateTransaction, err)
 	}
@@ -275,7 +275,7 @@ func (m *DBLock) storeLease(l *Lock) error {
 		return errors.Join(ErrRefreshLease, err)
 	}
 	if affected == 0 {
-		m.logger.Warn().Str("lock", l.id).Msg("lease lost")
+		db.logger.Warn().Str("lock", l.id).Msg("lease lost")
 		_ = tx.Rollback()
 		return ErrLockAlreadyReleased
 	}
@@ -286,13 +286,13 @@ func (m *DBLock) storeLease(l *Lock) error {
 	return nil
 }
 
-func (m *DBLock) leashRefresh(l *Lock) error {
+func (db *DBLock) leaseRefresh(l *Lock) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.isReleased {
 		return ErrLockAlreadyReleased
 	}
-	err := m.try(l.ctx, func() error { return m.storeLease(l) })
+	err := db.try(l.ctx, func() error { return db.storeLease(l) })
 	if err != nil {
 		l.isReleased = true
 		return errors.Join(ErrRefreshLease, err)
@@ -300,15 +300,15 @@ func (m *DBLock) leashRefresh(l *Lock) error {
 	return nil
 }
 
-func (m *DBLock) try(ctx context.Context, do func() error) error {
-	retryPeriod := m.options.LeaseRefreshFrequency
+func (db *DBLock) try(ctx context.Context, do func() error) error {
+	retryPeriod := db.options.LeaseRefreshFrequency
 	var err error
 	for i := 0; i < maxRetries; i++ {
 		err = do()
 		if err == nil || ctx.Err() != nil {
 			break
 		}
-		m.logger.Warn().Err(err).Msg("invalid transaction, retrying")
+		db.logger.Warn().Err(err).Msg("invalid transaction, retrying")
 		utils.Wait(ctx, retryPeriod)
 	}
 	return err

@@ -8,8 +8,8 @@ import (
 )
 
 type Lock struct {
-	manager *DBLock
-	id      string
+	db *DBLock
+	id string
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -22,18 +22,18 @@ type Lock struct {
 	isReleased bool
 }
 
-func newLock(manager *DBLock, id string) *Lock {
-	ctx, cancel := context.WithCancel(manager.ctx)
+func newLock(db *DBLock, id string) *Lock {
+	ctx, cancel := context.WithCancel(db.ctx)
 	return &Lock{
-		manager: manager,
-		id:      id,
-		ctx:     ctx,
-		cancel:  cancel,
+		db:     db,
+		id:     id,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
 func (l *Lock) Close() error {
-	err := l.manager.Release(l)
+	err := l.db.Release(l)
 	return err
 }
 
