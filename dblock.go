@@ -40,10 +40,6 @@ var (
 
 const maxRetries = 1024
 
-var versionIsNull = entSQL.P().Append(func(b *entSQL.Builder) {
-	b.WriteString(fmt.Sprintf(`"%s"."%s" IS NULL`, lock.Table, lock.FieldVersion))
-})
-
 type DBLock struct {
 	logger  types.SubLogger
 	options *Options
@@ -179,6 +175,10 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 	if err != nil {
 		return errors.Join(ErrCreateTransaction, err)
 	}
+
+	var versionIsNull = entSQL.P().Append(func(b *entSQL.Builder) {
+		b.WriteString(fmt.Sprintf(`"%s"."%s" IS NULL`, lock.Table, lock.FieldVersion))
+	})
 
 	var versionIsEQ = entSQL.P().Append(func(b *entSQL.Builder) {
 		b.WriteString(fmt.Sprintf(`"%s"."%s" = `, lock.Table, lock.FieldVersion))
