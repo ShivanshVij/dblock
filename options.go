@@ -1,15 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package dblock
 
 import (
 	"errors"
-	"github.com/loopholelabs/logging/loggers/noop"
 	"time"
 
+	"github.com/loopholelabs/logging/loggers/noop"
 	"github.com/loopholelabs/logging/types"
 )
 
 var (
-	ErrInvalidLogger                = errors.New("invalid logger")
 	ErrInvalidOwner                 = errors.New("invalid owner")
 	ErrInvalidDBType                = errors.New("invalid database type")
 	ErrInvalidDatabaseURL           = errors.New("invalid database URL")
@@ -21,7 +22,7 @@ type DBType int
 
 const (
 	Undefined DBType = iota
-	Postgres  DBType = iota
+	Postgres
 )
 
 type Options struct {

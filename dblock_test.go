@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package dblock
 
 import (
@@ -123,14 +125,59 @@ func TestSingleWriter(t *testing.T) {
 	})
 }
 
-func TestContention(t *testing.T) {
+func TestContentionSingleClient(t *testing.T) {
+	const numClients = 3
+	pg := setupPostgres(t)
+
+	db := setupDB(t, pg)
+	t.Cleanup(func() { require.NoError(t, db.Stop()) })
+
+	acquired := make(chan struct{})
+	acquire := func(client int) {
+		l := db.Lock(t.Name())
+		t.Logf("client %d acquiring lock", client)
+		err := db.Acquire(l)
+		t.Logf("client %d acquired lock", client)
+		require.NoError(t, err)
+
+		acquired <- struct{}{}
+
+		time.Sleep(db.options.LeaseDuration * 2)
+
+		t.Logf("client %d releasing lock", client)
+		err = db.Release(l)
+		require.NoError(t, err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < numClients; i++ {
+		wg.Add(1)
+		go func(client int) {
+			defer wg.Done()
+			acquire(client)
+		}(i)
+		time.Sleep(leaseDuration)
+	}
+
+	for i := 0; i < numClients; i++ {
+		select {
+		case <-acquired:
+		case <-time.After(leaseDuration * 3):
+			t.Fatal("timed out waiting for lock acquisition")
+		}
+	}
+
+	wg.Wait()
+}
+
+func TestContentionSeparateClients(t *testing.T) {
 	const numClients = 3
 	pg := setupPostgres(t)
 
 	acquired := make(chan struct{})
 	acquire := func(client int) {
 		db := setupDB(t, pg, fmt.Sprintf("%s-%d", t.Name(), client))
-		t.Cleanup(func() { require.NoError(t, db.Stop()) })
+		defer func() { require.NoError(t, db.Stop()) }()
 
 		l := db.Lock(t.Name())
 		t.Logf("client %d acquiring lock", client)
