@@ -38,8 +38,6 @@ var (
 	ErrLockAlreadyReleased = errors.New("lock already released")
 )
 
-const maxRetries = 1024
-
 type DBLock struct {
 	logger  types.SubLogger
 	options *Options
@@ -327,7 +325,7 @@ func (db *DBLock) leaseRefresh(l *Lock) error {
 func (db *DBLock) try(ctx context.Context, do func() error) error {
 	retryPeriod := db.options.LeaseRefreshFrequency
 	var err error
-	for i := 0; i < maxRetries; i++ {
+	for {
 		err = do()
 		if err == nil || ctx.Err() != nil || errors.Is(err, ErrLockAlreadyReleased) {
 			break
