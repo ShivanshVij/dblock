@@ -20,7 +20,7 @@ import (
 
 const leaseDuration = time.Millisecond * 100
 
-func setupPostgres(tb testing.TB, name ...string) *DBLock {
+func setupPostgres(tb testing.TB, pgContainer *postgres.PostgresContainer, name ...string) (*DBLock, *postgres.PostgresContainer) {
 	ctx := context.Background()
 
 	dbName := tb.Name()
@@ -28,19 +28,22 @@ func setupPostgres(tb testing.TB, name ...string) *DBLock {
 		dbName = name[0]
 	}
 
-	pgContainer, err := postgres.Run(ctx, "postgres:15.3-alpine",
-		postgres.WithDatabase(dbName),
-		postgres.WithUsername("postgres"),
-		postgres.WithPassword("postgres"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(5*time.Second)),
-	)
-	require.NoError(tb, err)
-	tb.Cleanup(func() {
-		err := pgContainer.Terminate(ctx)
+	var err error
+	if pgContainer == nil {
+		pgContainer, err = postgres.Run(ctx, "postgres:15.3-alpine",
+			postgres.WithDatabase(dbName),
+			postgres.WithUsername("postgres"),
+			postgres.WithPassword("postgres"),
+			testcontainers.WithWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).WithStartupTimeout(5*time.Second)),
+		)
 		require.NoError(tb, err)
-	})
+		tb.Cleanup(func() {
+			err := pgContainer.Terminate(ctx)
+			require.NoError(tb, err)
+		})
+	}
 
 	connStr, err := pgContainer.ConnectionString(context.Background(), "sslmode=disable")
 	require.NoError(tb, err)
@@ -54,7 +57,7 @@ func setupPostgres(tb testing.TB, name ...string) *DBLock {
 	})
 	require.NoError(tb, err)
 
-	return db
+	return db, pgContainer
 }
 
 func setupSQLite(tb testing.TB, name ...string) *DBLock {
@@ -134,7 +137,7 @@ func testSingleWriter(db *DBLock) func(t *testing.T) {
 }
 
 func TestSingleWriter(t *testing.T) {
-	pgDB := setupPostgres(t)
+	pgDB, _ := setupPostgres(t, nil)
 	t.Cleanup(func() { require.NoError(t, pgDB.Stop()) })
 
 	t.Run("postgres", testSingleWriter(pgDB))
@@ -145,10 +148,12 @@ func TestSingleWriter(t *testing.T) {
 	t.Run("sqlite", testSingleWriter(sqliteDB))
 }
 
-func testContention(db *DBLock, numClients int) func(t *testing.T) {
+func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
 	return func(t *testing.T) {
+		require.Equal(t, numClients, len(DBs))
+
 		acquired := make(chan struct{})
-		acquire := func(client int) {
+		acquire := func(client int, db *DBLock) {
 			l := db.Lock(t.Name())
 			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("client acquiring lock")
 			err := db.Acquire(l)
@@ -169,7 +174,7 @@ func testContention(db *DBLock, numClients int) func(t *testing.T) {
 			wg.Add(1)
 			go func(client int) {
 				defer wg.Done()
-				acquire(client)
+				acquire(client, DBs[i])
 			}(i)
 		}
 
@@ -188,23 +193,34 @@ func testContention(db *DBLock, numClients int) func(t *testing.T) {
 func TestContention(t *testing.T) {
 	const numClients = 3
 
-	pgDB := setupPostgres(t)
-	t.Cleanup(func() { require.NoError(t, pgDB.Stop()) })
+	var pgContainer *postgres.PostgresContainer
+	pgDBs := make([]*DBLock, numClients)
+	pgDBs[0], pgContainer = setupPostgres(t, nil, fmt.Sprintf("client-0"))
+	t.Cleanup(func() { require.NoError(t, pgDBs[0].Stop()) })
+	for i := 1; i < numClients; i++ {
+		pgDBs[i], _ = setupPostgres(t, pgContainer, fmt.Sprintf("client-%d", i))
+		t.Cleanup(func() { require.NoError(t, pgDBs[i].Stop()) })
+	}
+	t.Run("postgres", testContention(numClients, pgDBs))
 
-	t.Run("postgres", testContention(pgDB, numClients))
-
-	sqliteDB := setupSQLite(t)
-	t.Cleanup(func() { require.NoError(t, sqliteDB.Stop()) })
-
-	t.Run("sqlite", testContention(sqliteDB, numClients))
+	sqliteDBs := make([]*DBLock, numClients)
+	sqliteDBs[0] = setupSQLite(t, fmt.Sprintf("client-0"))
+	t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
+	for i := 1; i < numClients; i++ {
+		sqliteDBs[i] = setupSQLite(t, fmt.Sprintf("client-%d", i))
+		t.Cleanup(func() { require.NoError(t, sqliteDBs[i].Stop()) })
+	}
+	t.Run("sqlite", testContention(numClients, sqliteDBs))
 }
 
-func testFlakyConnection(db *DBLock, numClients int) func(t *testing.T) {
+func testFlakyConnection(numClients int, DBs []*DBLock) func(t *testing.T) {
 	return func(t *testing.T) {
+		require.Equal(t, numClients, len(DBs))
+
 		flakyAcquired := make(chan struct{})
 		normalAcquired := make(chan struct{})
 
-		flakyAcquire := func(client int) {
+		flakyAcquire := func(client int, db *DBLock) {
 			l := db.Lock(t.Name())
 			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client acquiring lock")
 			err := db.Acquire(l)
@@ -237,7 +253,7 @@ func testFlakyConnection(db *DBLock, numClients int) func(t *testing.T) {
 			require.ErrorIs(t, err, ErrLockAlreadyReleased)
 		}
 
-		normalAcquire := func(client int) {
+		normalAcquire := func(client int, db *DBLock) {
 			l := db.Lock(t.Name())
 			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("normal client acquiring lock")
 			err := db.Acquire(l)
@@ -257,7 +273,7 @@ func testFlakyConnection(db *DBLock, numClients int) func(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			flakyAcquire(0)
+			flakyAcquire(0, DBs[0])
 		}()
 
 		select {
@@ -270,7 +286,7 @@ func testFlakyConnection(db *DBLock, numClients int) func(t *testing.T) {
 			wg.Add(1)
 			go func(client int) {
 				defer wg.Done()
-				normalAcquire(client)
+				normalAcquire(client, DBs[i])
 			}(i)
 		}
 
@@ -289,13 +305,24 @@ func testFlakyConnection(db *DBLock, numClients int) func(t *testing.T) {
 func TestFlakyConnection(t *testing.T) {
 	const numClients = 3
 
-	pgDB := setupPostgres(t)
-	t.Cleanup(func() { require.NoError(t, pgDB.Stop()) })
+	var pgContainer *postgres.PostgresContainer
+	pgDBs := make([]*DBLock, numClients)
+	pgDBs[0], pgContainer = setupPostgres(t, nil, fmt.Sprintf("client-0"))
+	t.Cleanup(func() { require.NoError(t, pgDBs[0].Stop()) })
+	for i := 1; i < numClients; i++ {
+		pgDBs[i], _ = setupPostgres(t, pgContainer, fmt.Sprintf("client-%d", i))
+		t.Cleanup(func() { require.NoError(t, pgDBs[i].Stop()) })
+	}
 
-	t.Run("postgres", testFlakyConnection(pgDB, numClients))
+	t.Run("postgres", testFlakyConnection(numClients, pgDBs))
 
-	sqliteDB := setupSQLite(t)
-	t.Cleanup(func() { require.NoError(t, sqliteDB.Stop()) })
+	sqliteDBs := make([]*DBLock, numClients)
+	sqliteDBs[0] = setupSQLite(t, fmt.Sprintf("client-0"))
+	t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
+	for i := 1; i < numClients; i++ {
+		sqliteDBs[i] = setupSQLite(t, fmt.Sprintf("client-%d", i))
+		t.Cleanup(func() { require.NoError(t, sqliteDBs[i].Stop()) })
+	}
 
-	t.Run("sqlite", testFlakyConnection(sqliteDB, numClients))
+	t.Run("sqlite", testFlakyConnection(numClients, sqliteDBs))
 }
