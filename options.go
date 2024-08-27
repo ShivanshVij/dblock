@@ -44,7 +44,7 @@ func (o *Options) validate() error {
 		return ErrInvalidOwner
 	}
 
-	if o.DBType != Postgres && o.DBType != SQLite {
+	if o.DBType != Postgres {
 		return ErrInvalidDBType
 	}
 

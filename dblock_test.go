@@ -142,10 +142,10 @@ func TestSingleWriter(t *testing.T) {
 
 	t.Run("postgres", testSingleWriter(pgDB))
 
-	sqliteDB := setupSQLite(t)
-	t.Cleanup(func() { require.NoError(t, sqliteDB.Stop()) })
-
-	t.Run("sqlite", testSingleWriter(sqliteDB))
+	//sqliteDB := setupSQLite(t)
+	//t.Cleanup(func() { require.NoError(t, sqliteDB.Stop()) })
+	//
+	//t.Run("sqlite", testSingleWriter(sqliteDB))
 }
 
 func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
@@ -203,14 +203,14 @@ func TestContention(t *testing.T) {
 	}
 	t.Run("postgres", testContention(numClients, pgDBs))
 
-	sqliteDBs := make([]*DBLock, numClients)
-	sqliteDBs[0] = setupSQLite(t, fmt.Sprintf("client-0"))
-	t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
-	for i := 1; i < numClients; i++ {
-		sqliteDBs[i] = setupSQLite(t, fmt.Sprintf("client-%d", i))
-		t.Cleanup(func() { require.NoError(t, sqliteDBs[i].Stop()) })
-	}
-	t.Run("sqlite", testContention(numClients, sqliteDBs))
+	//sqliteDBs := make([]*DBLock, numClients)
+	//sqliteDBs[0] = setupSQLite(t, fmt.Sprintf("client-0"))
+	//t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
+	//for i := 1; i < numClients; i++ {
+	//	sqliteDBs[i] = setupSQLite(t, fmt.Sprintf("client-%d", i))
+	//	t.Cleanup(func() { require.NoError(t, sqliteDBs[i].Stop()) })
+	//}
+	//t.Run("sqlite", testContention(numClients, sqliteDBs))
 }
 
 func testFlakyConnection(numClients int, DBs []*DBLock) func(t *testing.T) {
@@ -316,13 +316,13 @@ func TestFlakyConnection(t *testing.T) {
 
 	t.Run("postgres", testFlakyConnection(numClients, pgDBs))
 
-	sqliteDBs := make([]*DBLock, numClients)
-	sqliteDBs[0] = setupSQLite(t, fmt.Sprintf("client-0"))
-	t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
-	for i := 1; i < numClients; i++ {
-		sqliteDBs[i] = setupSQLite(t, fmt.Sprintf("client-%d", i))
-		t.Cleanup(func() { require.NoError(t, sqliteDBs[i].Stop()) })
-	}
-
-	t.Run("sqlite", testFlakyConnection(numClients, sqliteDBs))
+	//sqliteDBs := make([]*DBLock, numClients)
+	//sqliteDBs[0] = setupSQLite(t, fmt.Sprintf("client-0"))
+	//t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
+	//for i := 1; i < numClients; i++ {
+	//	sqliteDBs[i] = setupSQLite(t, fmt.Sprintf("client-%d", i))
+	//	t.Cleanup(func() { require.NoError(t, sqliteDBs[i].Stop()) })
+	//}
+	//
+	//t.Run("sqlite", testFlakyConnection(numClients, sqliteDBs))
 }

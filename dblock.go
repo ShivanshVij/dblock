@@ -176,11 +176,11 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 		return errors.Join(ErrCreateTransaction, err)
 	}
 
-	var versionIsNull = entSQL.P().Append(func(b *entSQL.Builder) {
+	versionIsNull := entSQL.P().Append(func(b *entSQL.Builder) {
 		b.WriteString(fmt.Sprintf(`"%s"."%s" IS NULL`, lock.Table, lock.FieldVersion))
 	})
 
-	var versionIsEQ = entSQL.P().Append(func(b *entSQL.Builder) {
+	versionIsEQ := entSQL.P().Append(func(b *entSQL.Builder) {
 		b.WriteString(fmt.Sprintf(`"%s"."%s" = `, lock.Table, lock.FieldVersion))
 		b.Arg(l.version)
 	})
