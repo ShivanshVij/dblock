@@ -6,7 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
+	"strings"
 	"sync"
 
 	"entgo.io/ent/dialect"
@@ -34,15 +34,24 @@ var (
 	ErrCreateTransaction = errors.New("cannot create transaction")
 	ErrCommitTransaction = errors.New("cannot commit transaction")
 
+	ErrSerializationError  = errors.New("serialization error")
 	ErrRefreshLease        = errors.New("cannot refresh lease")
 	ErrLockAlreadyReleased = errors.New("lock already released")
 )
+
+const PGQuery = `
+INSERT INTO ` + lock.Table + `("` + lock.FieldID + `", "` + lock.FieldVersion + `", "` + lock.FieldOwner + `") 
+VALUES($1, $2, $3) 
+ON CONFLICT ("` + lock.FieldID + `") DO UPDATE 
+SET "` + lock.FieldVersion + `" = $2, "` + lock.FieldOwner + `" = $3 
+WHERE ` + lock.Table + `."` + lock.FieldVersion + `" IS NULL OR ` + lock.Table + `."` + lock.FieldVersion + `" = $4`
 
 type DBLock struct {
 	logger  types.SubLogger
 	options *Options
 
 	sql *ent.Client
+	db  *sql.DB
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -90,6 +99,7 @@ func New(options *Options) (*DBLock, error) {
 		logger:  logger,
 		options: options,
 		sql:     sqlClient,
+		db:      db,
 		ctx:     ctx,
 		cancel:  cancel,
 	}, nil
@@ -176,50 +186,42 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 		return errors.Join(ErrCreateTransaction, err)
 	}
 
-	versionIsNull := entSQL.P().Append(func(b *entSQL.Builder) {
-		b.WriteString(fmt.Sprintf(`"%s"."%s" IS NULL`, lock.Table, lock.FieldVersion))
-	})
-
-	versionIsEQ := entSQL.P().Append(func(b *entSQL.Builder) {
-		b.WriteString(fmt.Sprintf(`"%s"."%s" = `, lock.Table, lock.FieldVersion))
-		b.Arg(l.version)
-	})
-
-	err = tx.Lock.
-		Create().
-		SetID(l.id).
-		SetVersion(version).
-		SetOwner(db.options.Owner).
-		OnConflict(
-			entSQL.ConflictColumns(lock.FieldID),
-			entSQL.ResolveWithNewValues(),
-			entSQL.UpdateWhere(entSQL.Or(versionIsNull, versionIsEQ)),
-		).
-		Exec(ctx)
+	_, err = tx.ExecContext(ctx, PGQuery, l.id, version, db.options.Owner, l.version)
 	if err != nil {
-		_l, refreshErr := db.getLock(ctx, tx, l)
-		if refreshErr != nil {
-			_ = tx.Rollback()
-			return errors.Join(ErrNotAcquired, err, refreshErr)
+		_ = tx.Rollback()
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrNotAcquired, ErrSerializationError, err)
 		}
-		l.version = _l.Version
-		_ = tx.Rollback()
 		return errors.Join(ErrNotAcquired, err)
 	}
 
-	var _l *ent.Lock
-	_l, err = db.getLock(ctx, tx, l)
+	rows, err := tx.QueryContext(ctx, `SELECT "`+lock.FieldVersion+`" FROM `+lock.Table+` WHERE `+lock.FieldID+` = $1 FOR UPDATE`, l.id)
 	if err != nil {
 		_ = tx.Rollback()
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrNotAcquired, ErrSerializationError, err)
+		}
 		return errors.Join(ErrNotAcquired, err)
 	}
 
-	if _l.Version != version {
-		l.version = _l.Version
+	var _version uuid.UUID
+	err = utils.RowScan(rows, &_version)
+	if err != nil {
+		_ = tx.Rollback()
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrNotAcquired, ErrSerializationError, err)
+		}
+		return errors.Join(ErrNotAcquired, err)
+	}
+	if _version != version {
+		l.version = _version
 		_ = tx.Rollback()
 		return ErrNotAcquired
 	}
 	if err = tx.Commit(); err != nil {
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrCommitTransaction, ErrSerializationError, err)
+		}
 		return errors.Join(ErrCommitTransaction, err)
 	}
 	l.version = version
@@ -229,9 +231,17 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 func (db *DBLock) getLock(ctx context.Context, tx *ent.Tx, l *Lock) (_l *ent.Lock, err error) {
 	switch db.options.DBType {
 	case Postgres:
-		_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+		if tx == nil {
+			_l, err = db.sql.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+		} else {
+			_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+		}
 	case SQLite:
-		_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
+		if tx == nil {
+			_l, err = db.sql.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
+		} else {
+			_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
+		}
 	default:
 		return nil, ErrInvalidDBType
 	}
@@ -254,6 +264,9 @@ func (db *DBLock) storeRelease(l *Lock) error {
 		Save(ctx)
 	if err != nil {
 		_ = tx.Rollback()
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrNotReleased, ErrSerializationError, err)
+		}
 		return errors.Join(ErrNotReleased, err)
 	}
 	if affected == 0 {
@@ -267,9 +280,15 @@ func (db *DBLock) storeRelease(l *Lock) error {
 		Exec(ctx)
 	if err != nil {
 		_ = tx.Rollback()
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrNotReleased, ErrSerializationError, err)
+		}
 		return errors.Join(ErrNotReleased, err)
 	}
 	if err = tx.Commit(); err != nil {
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrCommitTransaction, ErrSerializationError, err)
+		}
 		return errors.Join(ErrCommitTransaction, err)
 	}
 	l.isReleased = true
@@ -294,6 +313,9 @@ func (db *DBLock) storeLease(l *Lock) error {
 		Save(ctx)
 	if err != nil {
 		_ = tx.Rollback()
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrRefreshLease, ErrSerializationError, err)
+		}
 		return errors.Join(ErrRefreshLease, err)
 	}
 	if affected == 0 {
@@ -302,6 +324,9 @@ func (db *DBLock) storeLease(l *Lock) error {
 		return ErrLockAlreadyReleased
 	}
 	if err = tx.Commit(); err != nil {
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(ErrCommitTransaction, ErrSerializationError, err)
+		}
 		return errors.Join(ErrCommitTransaction, err)
 	}
 	l.version = version
@@ -327,7 +352,7 @@ func (db *DBLock) try(ctx context.Context, do func() error) error {
 	var err error
 	for {
 		err = do()
-		if err == nil || ctx.Err() != nil || errors.Is(err, ErrLockAlreadyReleased) {
+		if err == nil || ctx.Err() != nil || !errors.Is(err, ErrSerializationError) {
 			break
 		}
 		db.logger.Warn().Err(err).Msg("invalid transaction, retrying")

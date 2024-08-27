@@ -3,6 +3,7 @@
 package dblock
 
 import (
+	"cirello.io/pglock"
 	"context"
 	"fmt"
 	"sync"
@@ -149,23 +150,38 @@ func TestSingleWriter(t *testing.T) {
 }
 
 func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
+
 	return func(t *testing.T) {
 		require.Equal(t, numClients, len(DBs))
 
-		acquired := make(chan struct{})
-		acquire := func(client int, db *DBLock) {
-			l := db.Lock(t.Name())
-			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("client acquiring lock")
-			err := db.Acquire(l)
-			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("client acquired lock")
+		cs := make([]*pglock.Client, numClients)
+		var err error
+		for i := 0; i < numClients; i++ {
+			cs[i], err = pglock.UnsafeNew(DBs[i].db,
+				pglock.WithLeaseDuration(leaseDuration),
+				pglock.WithHeartbeatFrequency(leaseDuration/2),
+			)
 			require.NoError(t, err)
+		}
+		err = cs[0].CreateTable()
+		require.NoError(t, err)
+
+		acquired := make(chan struct{})
+		acquire := func(client int, db *DBLock, pgc *pglock.Client) {
+			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client acquiring lock")
+			l := db.Lock(t.Name())
+			err := db.Acquire(l)
+			//l, err := pgc.Acquire(t.Name())
+			require.NoError(t, err)
+			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client acquired lock")
 
 			acquired <- struct{}{}
 
 			time.Sleep(db.options.LeaseDuration)
 
-			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("client releasing lock")
-			err = db.Release(l)
+			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client releasing lock")
+			//err = l.Close()
+			err = l.Release()
 			require.NoError(t, err)
 		}
 
@@ -174,14 +190,14 @@ func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
 			wg.Add(1)
 			go func(client int) {
 				defer wg.Done()
-				acquire(client, DBs[i])
+				acquire(client, DBs[i], cs[i])
 			}(i)
 		}
 
 		for i := 0; i < numClients; i++ {
 			select {
 			case <-acquired:
-			case <-time.After(leaseDuration * 2):
+			case <-time.After(leaseDuration * time.Duration(numClients)):
 				t.Fatal("timed out waiting for lock acquisition")
 			}
 		}
@@ -325,4 +341,27 @@ func TestFlakyConnection(t *testing.T) {
 	//}
 	//
 	//t.Run("sqlite", testFlakyConnection(numClients, sqliteDBs))
+}
+
+func TestManyClients(t *testing.T) {
+	const numClients = 64
+
+	var pgContainer *postgres.PostgresContainer
+	pgDBs := make([]*DBLock, numClients)
+	pgDBs[0], pgContainer = setupPostgres(t, nil, fmt.Sprintf("client-0"))
+	t.Cleanup(func() { require.NoError(t, pgDBs[0].Stop()) })
+	for i := 1; i < numClients; i++ {
+		pgDBs[i], _ = setupPostgres(t, pgContainer, fmt.Sprintf("client-%d", i))
+		t.Cleanup(func() { require.NoError(t, pgDBs[i].Stop()) })
+	}
+	t.Run("postgres", testContention(numClients, pgDBs))
+
+	//sqliteDBs := make([]*DBLock, numClients)
+	//sqliteDBs[0] = setupSQLite(t, fmt.Sprintf("client-0"))
+	//t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
+	//for i := 1; i < numClients; i++ {
+	//	sqliteDBs[i] = setupSQLite(t, fmt.Sprintf("client-%d", i))
+	//	t.Cleanup(func() { require.NoError(t, sqliteDBs[i].Stop()) })
+	//}
+	//t.Run("sqlite", testContention(numClients, sqliteDBs))
 }
