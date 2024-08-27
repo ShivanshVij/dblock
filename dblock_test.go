@@ -150,16 +150,16 @@ func testContention(db *DBLock, numClients int) func(t *testing.T) {
 		acquired := make(chan struct{})
 		acquire := func(client int) {
 			l := db.Lock(t.Name())
-			t.Logf("client %d acquiring lock", client)
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("client acquiring lock")
 			err := db.Acquire(l)
-			t.Logf("client %d acquired lock", client)
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("client acquired lock")
 			require.NoError(t, err)
 
 			acquired <- struct{}{}
 
-			time.Sleep(db.options.LeaseDuration * 2)
+			time.Sleep(db.options.LeaseDuration)
 
-			t.Logf("client %d releasing lock", client)
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("client releasing lock")
 			err = db.Release(l)
 			require.NoError(t, err)
 		}
@@ -171,13 +171,12 @@ func testContention(db *DBLock, numClients int) func(t *testing.T) {
 				defer wg.Done()
 				acquire(client)
 			}(i)
-			time.Sleep(leaseDuration)
 		}
 
 		for i := 0; i < numClients; i++ {
 			select {
 			case <-acquired:
-			case <-time.After(leaseDuration * 3):
+			case <-time.After(leaseDuration * 2):
 				t.Fatal("timed out waiting for lock acquisition")
 			}
 		}
@@ -198,4 +197,105 @@ func TestContention(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, sqliteDB.Stop()) })
 
 	t.Run("sqlite", testContention(sqliteDB, numClients))
+}
+
+func testFlakyConnection(db *DBLock, numClients int) func(t *testing.T) {
+	return func(t *testing.T) {
+		flakyAcquired := make(chan struct{})
+		normalAcquired := make(chan struct{})
+
+		flakyAcquire := func(client int) {
+			l := db.Lock(t.Name())
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client acquiring lock")
+			err := db.Acquire(l)
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client acquired lock")
+			require.NoError(t, err)
+
+			flakyAcquired <- struct{}{}
+
+			time.Sleep(db.options.LeaseDuration)
+
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client releasing lock")
+
+			l.cancel()
+			l.wg.Wait()
+
+			time.Sleep(db.options.LeaseDuration)
+
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client attempting to retake ownership of lock")
+			l.ctx, l.cancel = context.WithCancel(db.ctx)
+
+			l.wg.Add(1)
+			db.wg.Add(1)
+			go db.doLeaseRefresh(l)
+
+			time.Sleep(db.options.LeaseDuration)
+
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client attempting to release lock")
+
+			err = db.Release(l)
+			require.ErrorIs(t, err, ErrLockAlreadyReleased)
+		}
+
+		normalAcquire := func(client int) {
+			l := db.Lock(t.Name())
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("normal client acquiring lock")
+			err := db.Acquire(l)
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("normal client acquired lock")
+			require.NoError(t, err)
+
+			normalAcquired <- struct{}{}
+
+			time.Sleep(db.options.LeaseDuration)
+
+			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("normal client releasing lock")
+			err = db.Release(l)
+			require.NoError(t, err)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			flakyAcquire(0)
+		}()
+
+		select {
+		case <-flakyAcquired:
+		case <-time.After(leaseDuration * 2):
+			t.Fatal("timed out waiting for flaky lock acquisition")
+		}
+
+		for i := 1; i < numClients; i++ {
+			wg.Add(1)
+			go func(client int) {
+				defer wg.Done()
+				normalAcquire(client)
+			}(i)
+		}
+
+		for i := 1; i < numClients; i++ {
+			select {
+			case <-normalAcquired:
+			case <-time.After(leaseDuration * 3):
+				t.Fatal("timed out waiting for normal lock acquisition")
+			}
+		}
+
+		wg.Wait()
+	}
+}
+
+func TestFlakyConnection(t *testing.T) {
+	const numClients = 3
+
+	pgDB := setupPostgres(t)
+	t.Cleanup(func() { require.NoError(t, pgDB.Stop()) })
+
+	t.Run("postgres", testFlakyConnection(pgDB, numClients))
+
+	sqliteDB := setupSQLite(t)
+	t.Cleanup(func() { require.NoError(t, sqliteDB.Stop()) })
+
+	t.Run("sqlite", testFlakyConnection(sqliteDB, numClients))
 }

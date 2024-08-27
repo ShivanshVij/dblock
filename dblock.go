@@ -145,24 +145,26 @@ func (db *DBLock) tryAcquire(l *Lock) error {
 	}
 	l.wg.Add(1)
 	db.wg.Add(1)
-	go func() {
-		defer l.cancel()
-		defer l.wg.Done()
-		defer db.wg.Done()
-		defer db.logger.Debug().Str("lock", l.id).Msg("lease refresh stopped")
-		db.logger.Debug().Str("lock", l.id).Msg("lease refresh started")
-		for {
-			if err := db.leaseRefresh(l); err != nil {
-				db.logger.Error().Err(err).Str("lock", l.id).Msg("lease refresh failed")
-				return
-			} else if err := l.ctx.Err(); err != nil {
-				return
-			}
-			db.logger.Debug().Str("lock", l.id).Msg("lease refreshed")
-			utils.Wait(l.ctx, db.options.LeaseRefreshFrequency)
-		}
-	}()
+	go db.doLeaseRefresh(l)
 	return nil
+}
+
+func (db *DBLock) doLeaseRefresh(l *Lock) {
+	defer l.cancel()
+	defer l.wg.Done()
+	defer db.wg.Done()
+	defer db.logger.Debug().Str("lock", l.id).Msg("lease refresh stopped")
+	db.logger.Debug().Str("lock", l.id).Msg("lease refresh started")
+	for {
+		if err := db.leaseRefresh(l); err != nil {
+			db.logger.Error().Err(err).Str("lock", l.id).Msg("lease refresh failed")
+			return
+		} else if err := l.ctx.Err(); err != nil {
+			return
+		}
+		db.logger.Debug().Str("lock", l.id).Msg("lease refreshed")
+		utils.Wait(l.ctx, db.options.LeaseRefreshFrequency)
+	}
 }
 
 func (db *DBLock) storeAcquire(l *Lock) error {
@@ -195,23 +197,20 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 			entSQL.ResolveWithNewValues(),
 			entSQL.UpdateWhere(entSQL.Or(versionIsNull, versionIsEQ)),
 		).
-		UpdateNewValues().
 		Exec(ctx)
 	if err != nil {
+		_l, refreshErr := db.getLock(ctx, tx, l)
+		if refreshErr != nil {
+			_ = tx.Rollback()
+			return errors.Join(ErrNotAcquired, err, refreshErr)
+		}
+		l.version = _l.Version
 		_ = tx.Rollback()
 		return errors.Join(ErrNotAcquired, err)
 	}
 
 	var _l *ent.Lock
-	switch db.options.DBType {
-	case Postgres:
-		_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
-	case SQLite:
-		_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
-	default:
-		_ = tx.Rollback()
-		return ErrInvalidDBType
-	}
+	_l, err = db.getLock(ctx, tx, l)
 	if err != nil {
 		_ = tx.Rollback()
 		return errors.Join(ErrNotAcquired, err)
@@ -227,6 +226,18 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 	}
 	l.version = version
 	return nil
+}
+
+func (db *DBLock) getLock(ctx context.Context, tx *ent.Tx, l *Lock) (_l *ent.Lock, err error) {
+	switch db.options.DBType {
+	case Postgres:
+		_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+	case SQLite:
+		_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
+	default:
+		return nil, ErrInvalidDBType
+	}
+	return
 }
 
 func (db *DBLock) storeRelease(l *Lock) error {
@@ -318,7 +329,7 @@ func (db *DBLock) try(ctx context.Context, do func() error) error {
 	var err error
 	for i := 0; i < maxRetries; i++ {
 		err = do()
-		if err == nil || ctx.Err() != nil {
+		if err == nil || ctx.Err() != nil || errors.Is(err, ErrLockAlreadyReleased) {
 			break
 		}
 		db.logger.Warn().Err(err).Msg("invalid transaction, retrying")
