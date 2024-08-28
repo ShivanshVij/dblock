@@ -3,7 +3,6 @@
 package dblock
 
 import (
-	"cirello.io/pglock"
 	"context"
 	"fmt"
 	"sync"
@@ -154,24 +153,11 @@ func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
 	return func(t *testing.T) {
 		require.Equal(t, numClients, len(DBs))
 
-		cs := make([]*pglock.Client, numClients)
-		var err error
-		for i := 0; i < numClients; i++ {
-			cs[i], err = pglock.UnsafeNew(DBs[i].db,
-				pglock.WithLeaseDuration(leaseDuration),
-				pglock.WithHeartbeatFrequency(leaseDuration/2),
-			)
-			require.NoError(t, err)
-		}
-		err = cs[0].CreateTable()
-		require.NoError(t, err)
-
 		acquired := make(chan struct{})
-		acquire := func(client int, db *DBLock, pgc *pglock.Client) {
+		acquire := func(client int, db *DBLock) {
 			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client acquiring lock")
 			l := db.Lock(t.Name())
 			err := db.Acquire(l)
-			//l, err := pgc.Acquire(t.Name())
 			require.NoError(t, err)
 			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client acquired lock")
 
@@ -180,7 +166,6 @@ func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
 			time.Sleep(db.options.LeaseDuration)
 
 			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client releasing lock")
-			//err = l.Close()
 			err = l.Release()
 			require.NoError(t, err)
 		}
@@ -190,7 +175,7 @@ func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
 			wg.Add(1)
 			go func(client int) {
 				defer wg.Done()
-				acquire(client, DBs[i], cs[i])
+				acquire(client, DBs[i])
 			}(i)
 		}
 

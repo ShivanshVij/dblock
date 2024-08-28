@@ -98,7 +98,7 @@ func New(options *Options) (*DBLock, error) {
 	return &DBLock{
 		logger:  logger,
 		options: options,
-		sql:     sqlClient,
+		sql:     sqlClient.Debug(),
 		db:      db,
 		ctx:     ctx,
 		cancel:  cancel,
@@ -189,40 +189,22 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 	_, err = tx.ExecContext(ctx, PGQuery, l.id, version, db.options.Owner, l.version)
 	if err != nil {
 		_ = tx.Rollback()
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrNotAcquired, ErrSerializationError, err)
-		}
-		return errors.Join(ErrNotAcquired, err)
+		return db.serializeError(ErrNotAcquired, err)
 	}
 
-	rows, err := tx.QueryContext(ctx, `SELECT "`+lock.FieldVersion+`" FROM `+lock.Table+` WHERE `+lock.FieldID+` = $1 FOR UPDATE`, l.id)
+	_l, err := db.getLock(ctx, tx, l)
 	if err != nil {
 		_ = tx.Rollback()
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrNotAcquired, ErrSerializationError, err)
-		}
-		return errors.Join(ErrNotAcquired, err)
+		return db.serializeError(ErrNotAcquired, err)
 	}
 
-	var _version uuid.UUID
-	err = utils.RowScan(rows, &_version)
-	if err != nil {
-		_ = tx.Rollback()
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrNotAcquired, ErrSerializationError, err)
-		}
-		return errors.Join(ErrNotAcquired, err)
-	}
-	if _version != version {
-		l.version = _version
+	if _l.Version != version {
+		l.version = _l.Version
 		_ = tx.Rollback()
 		return ErrNotAcquired
 	}
 	if err = tx.Commit(); err != nil {
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrCommitTransaction, ErrSerializationError, err)
-		}
-		return errors.Join(ErrCommitTransaction, err)
+		return db.serializeError(ErrCommitTransaction, err)
 	}
 	l.version = version
 	return nil
@@ -345,6 +327,13 @@ func (db *DBLock) leaseRefresh(l *Lock) error {
 		return errors.Join(ErrRefreshLease, err)
 	}
 	return nil
+}
+
+func (db *DBLock) serializeError(expected error, err error) error {
+	if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+		return errors.Join(expected, ErrSerializationError, err)
+	}
+	return errors.Join(expected, err)
 }
 
 func (db *DBLock) try(ctx context.Context, do func() error) error {
