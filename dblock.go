@@ -58,7 +58,6 @@ type DBLock struct {
 	options *Options
 
 	sql *ent.Client
-	db  *sql.DB
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -106,7 +105,6 @@ func New(options *Options) (*DBLock, error) {
 		logger:  logger,
 		options: options,
 		sql:     sqlClient,
-		db:      db,
 		ctx:     ctx,
 		cancel:  cancel,
 	}, nil
