@@ -35,7 +35,7 @@ type Options struct {
 	LeaseRefreshFrequency time.Duration
 }
 
-func (o *Options) validate() error {
+func (o *Options) Validate() error {
 	if o.Logger == nil {
 		o.Logger = noop.New(types.InfoLevel)
 	}

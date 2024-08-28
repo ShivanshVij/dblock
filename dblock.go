@@ -66,7 +66,7 @@ type DBLock struct {
 
 func New(options *Options) (*DBLock, error) {
 	var err error
-	if err = options.validate(); err != nil {
+	if err = options.Validate(); err != nil {
 		return nil, errors.Join(ErrInvalidOptions, err)
 	}
 
