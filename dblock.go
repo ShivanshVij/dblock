@@ -242,6 +242,7 @@ func (db *DBLock) storeRelease(l *Lock) error {
 	}
 	if affected == 0 {
 		l.isReleased = true
+		l.closeNotify()
 		_ = tx.Rollback()
 		return ErrLockAlreadyReleased
 	}
@@ -258,6 +259,7 @@ func (db *DBLock) storeRelease(l *Lock) error {
 	}
 	l.isReleased = true
 	l.cancel()
+	l.closeNotify()
 	return nil
 }
 
@@ -301,6 +303,7 @@ func (db *DBLock) leaseRefresh(l *Lock) error {
 	err := db.try(l.ctx, func() error { return db.storeLease(l) })
 	if err != nil {
 		l.isReleased = true
+		l.closeNotify()
 		return errors.Join(ErrRefreshLease, err)
 	}
 	return nil

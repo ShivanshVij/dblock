@@ -5,17 +5,25 @@ package dblock
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/google/uuid"
+)
+
+const (
+	notifyStateOpen int32 = iota
+	notifyStateClosed
 )
 
 type Lock struct {
 	db *DBLock
 	id string
 
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
+	wg          sync.WaitGroup
+	ctx         context.Context
+	cancel      context.CancelFunc
+	notifyState atomic.Int32
+	notify      chan struct{}
 
 	mu sync.Mutex
 
@@ -31,6 +39,7 @@ func newLock(db *DBLock, id string) *Lock {
 		id:     id,
 		ctx:    ctx,
 		cancel: cancel,
+		notify: make(chan struct{}),
 	}
 }
 
@@ -44,6 +53,16 @@ func (l *Lock) Acquire(failIfLocked ...bool) error {
 
 func (l *Lock) Release() error {
 	return l.db.Release(l)
+}
+
+func (l *Lock) Notify() <-chan struct{} {
+	return l.notify
+}
+
+func (l *Lock) closeNotify() {
+	if l.notifyState.CompareAndSwap(notifyStateOpen, notifyStateClosed) {
+		close(l.notify)
+	}
 }
 
 func (l *Lock) IsReleased() bool {
