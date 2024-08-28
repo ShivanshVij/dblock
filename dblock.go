@@ -42,9 +42,16 @@ var (
 const PGQuery = `
 INSERT INTO ` + lock.Table + `("` + lock.FieldID + `", "` + lock.FieldVersion + `", "` + lock.FieldOwner + `") 
 VALUES($1, $2, $3) 
-ON CONFLICT ("` + lock.FieldID + `") DO UPDATE 
-SET "` + lock.FieldVersion + `" = $2, "` + lock.FieldOwner + `" = $3 
+ON CONFLICT ("` + lock.FieldID + `") DO 
+UPDATE SET "` + lock.FieldVersion + `" = $2, "` + lock.FieldOwner + `" = $3 
 WHERE ` + lock.Table + `."` + lock.FieldVersion + `" IS NULL OR ` + lock.Table + `."` + lock.FieldVersion + `" = $4`
+
+const SQLiteQuery = `
+INSERT INTO ` + lock.Table + ` ("` + lock.FieldID + `", "` + lock.FieldVersion + `", "` + lock.FieldOwner + `")
+VALUES( ?, ?, ? )
+ON CONFLICT ("` + lock.FieldID + `") DO 
+UPDATE SET "` + lock.FieldVersion + `" = ?, "` + lock.FieldOwner + `" = ? 
+WHERE ` + lock.Table + `."` + lock.FieldVersion + `" IS NULL OR ` + lock.Table + `."` + lock.FieldVersion + `" = ?`
 
 type DBLock struct {
 	logger  types.SubLogger
@@ -98,7 +105,7 @@ func New(options *Options) (*DBLock, error) {
 	return &DBLock{
 		logger:  logger,
 		options: options,
-		sql:     sqlClient.Debug(),
+		sql:     sqlClient,
 		db:      db,
 		ctx:     ctx,
 		cancel:  cancel,
@@ -186,7 +193,14 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 		return errors.Join(ErrCreateTransaction, err)
 	}
 
-	_, err = tx.ExecContext(ctx, PGQuery, l.id, version, db.options.Owner, l.version)
+	switch db.options.DBType {
+	case Postgres:
+		_, err = tx.ExecContext(ctx, PGQuery, l.id, version, db.options.Owner, l.version)
+	case SQLite:
+		_, err = tx.ExecContext(ctx, SQLiteQuery, l.id, version, db.options.Owner, version, db.options.Owner, l.version)
+	default:
+		return ErrInvalidDBType
+	}
 	if err != nil {
 		_ = tx.Rollback()
 		return db.serializeError(ErrNotAcquired, err)
@@ -210,26 +224,6 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 	return nil
 }
 
-func (db *DBLock) getLock(ctx context.Context, tx *ent.Tx, l *Lock) (_l *ent.Lock, err error) {
-	switch db.options.DBType {
-	case Postgres:
-		if tx == nil {
-			_l, err = db.sql.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
-		} else {
-			_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
-		}
-	case SQLite:
-		if tx == nil {
-			_l, err = db.sql.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
-		} else {
-			_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
-		}
-	default:
-		return nil, ErrInvalidDBType
-	}
-	return
-}
-
 func (db *DBLock) storeRelease(l *Lock) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -246,10 +240,7 @@ func (db *DBLock) storeRelease(l *Lock) error {
 		Save(ctx)
 	if err != nil {
 		_ = tx.Rollback()
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrNotReleased, ErrSerializationError, err)
-		}
-		return errors.Join(ErrNotReleased, err)
+		return db.serializeError(ErrNotReleased, err)
 	}
 	if affected == 0 {
 		l.isReleased = true
@@ -262,16 +253,10 @@ func (db *DBLock) storeRelease(l *Lock) error {
 		Exec(ctx)
 	if err != nil {
 		_ = tx.Rollback()
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrNotReleased, ErrSerializationError, err)
-		}
-		return errors.Join(ErrNotReleased, err)
+		return db.serializeError(ErrNotReleased, err)
 	}
 	if err = tx.Commit(); err != nil {
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrCommitTransaction, ErrSerializationError, err)
-		}
-		return errors.Join(ErrCommitTransaction, err)
+		return db.serializeError(ErrCommitTransaction, err)
 	}
 	l.isReleased = true
 	l.cancel()
@@ -295,10 +280,7 @@ func (db *DBLock) storeLease(l *Lock) error {
 		Save(ctx)
 	if err != nil {
 		_ = tx.Rollback()
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrRefreshLease, ErrSerializationError, err)
-		}
-		return errors.Join(ErrRefreshLease, err)
+		return db.serializeError(ErrRefreshLease, err)
 	}
 	if affected == 0 {
 		db.logger.Warn().Str("lock", l.id).Msg("lease lost")
@@ -306,10 +288,7 @@ func (db *DBLock) storeLease(l *Lock) error {
 		return ErrLockAlreadyReleased
 	}
 	if err = tx.Commit(); err != nil {
-		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-			return errors.Join(ErrCommitTransaction, ErrSerializationError, err)
-		}
-		return errors.Join(ErrCommitTransaction, err)
+		return db.serializeError(ErrCommitTransaction, err)
 	}
 	l.version = version
 	return nil
@@ -329,9 +308,38 @@ func (db *DBLock) leaseRefresh(l *Lock) error {
 	return nil
 }
 
+func (db *DBLock) getLock(ctx context.Context, tx *ent.Tx, l *Lock) (_l *ent.Lock, err error) {
+	switch db.options.DBType {
+	case Postgres:
+		if tx == nil {
+			_l, err = db.sql.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+		} else {
+			_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Modify(func(s *entSQL.Selector) { s.ForUpdate() }).Only(ctx)
+		}
+	case SQLite:
+		if tx == nil {
+			_l, err = db.sql.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
+		} else {
+			_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
+		}
+	default:
+		return nil, ErrInvalidDBType
+	}
+	return
+}
+
 func (db *DBLock) serializeError(expected error, err error) error {
-	if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
-		return errors.Join(expected, ErrSerializationError, err)
+	switch db.options.DBType {
+	case Postgres:
+		if strings.Contains(err.Error(), "(SQLSTATE 40001)") {
+			return errors.Join(expected, ErrSerializationError, err)
+		}
+	case SQLite:
+		if strings.Contains(err.Error(), "SQLITE_BUSY") || strings.Contains(err.Error(), "database table is locked") {
+			return errors.Join(expected, ErrSerializationError, err)
+		}
+	default:
+		return ErrInvalidDBType
 	}
 	return errors.Join(expected, err)
 }
