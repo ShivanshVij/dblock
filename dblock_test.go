@@ -148,24 +148,120 @@ func TestSingleWriter(t *testing.T) {
 	t.Run("sqlite", testSingleWriter(sqliteDB))
 }
 
-func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
+func testReleaseBeforeAcquire(DBs [2]*DBLock) func(t *testing.T) {
+	return func(t *testing.T) {
+		started := make(chan struct{})
 
+		acquired := make(chan struct{})
+		release := make(chan struct{})
+
+		acquire0 := func(l *Lock, db *DBLock) {
+			db.logger.Debug().Str("lock", t.Name()).Msg("client acquiring lock")
+			started <- struct{}{}
+			err := db.Acquire(l)
+			require.NoError(t, err)
+			db.logger.Debug().Str("lock", t.Name()).Msg("client acquired lock")
+
+			acquired <- struct{}{}
+			<-release
+
+			db.logger.Debug().Str("lock", t.Name()).Msg("client releasing lock")
+			err = l.Release()
+			require.NoError(t, err)
+		}
+
+		acquire1 := func(l *Lock, db *DBLock) {
+			db.logger.Debug().Str("lock", t.Name()).Msg("client acquiring lock")
+			started <- struct{}{}
+			err := db.Acquire(l)
+			require.ErrorIs(t, err, ErrNotAcquired)
+			db.logger.Debug().Str("lock", t.Name()).Msg("client lock acquisition cancelled")
+
+			err = l.Release()
+			require.ErrorIs(t, err, ErrLockAlreadyReleased)
+		}
+
+		var locks [2]*Lock
+		locks[0] = DBs[0].Lock(t.Name())
+		locks[1] = DBs[1].Lock(t.Name())
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			acquire0(locks[0], DBs[0])
+		}()
+
+		select {
+		case <-started:
+		case <-time.After(leaseDuration):
+			t.Fatal("timed out waiting for initial lock goroutine to start")
+		}
+
+		select {
+		case <-acquired:
+		case <-time.After(leaseDuration):
+			t.Fatal("timed out waiting for initial lock acquisition")
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			acquire1(locks[1], DBs[1])
+		}()
+
+		select {
+		case <-started:
+		case <-time.After(leaseDuration):
+			t.Fatal("timed out waiting for secondary lock goroutine to start")
+		}
+
+		time.Sleep(leaseDuration)
+
+		err := locks[1].Release()
+		require.ErrorIs(t, err, ErrLockAlreadyReleased)
+
+		release <- struct{}{}
+
+		wg.Wait()
+	}
+}
+
+func TestReleaseBeforeAcquire(t *testing.T) {
+	var pgContainer *postgres.PostgresContainer
+	pgDBs := [2]*DBLock{}
+	pgDBs[0], pgContainer = setupPostgres(t, nil, "client-0")
+	t.Cleanup(func() { require.NoError(t, pgDBs[0].Stop()) })
+	pgDBs[1], _ = setupPostgres(t, pgContainer, "client-1")
+	t.Cleanup(func() { require.NoError(t, pgDBs[1].Stop()) })
+	t.Run("postgres", testReleaseBeforeAcquire(pgDBs))
+
+	var sqliteConnStr string
+	sqliteDBs := [2]*DBLock{}
+	sqliteDBs[0], sqliteConnStr = setupSQLite(t, "", "client-0")
+	t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
+	sqliteDBs[1], _ = setupSQLite(t, sqliteConnStr, "client-1")
+	t.Cleanup(func() { require.NoError(t, sqliteDBs[1].Stop()) })
+	t.Run("sqlite", testReleaseBeforeAcquire(sqliteDBs))
+}
+
+func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
 	return func(t *testing.T) {
 		require.Equal(t, numClients, len(DBs))
 
 		acquired := make(chan struct{})
 		acquire := func(client int, db *DBLock) {
-			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client acquiring lock")
+			db.logger.Debug().Str("lock", t.Name()).Msg("client acquiring lock")
 			l := db.Lock(t.Name())
 			err := db.Acquire(l)
 			require.NoError(t, err)
-			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client acquired lock")
+			db.logger.Debug().Str("lock", t.Name()).Msg("client acquired lock")
 
 			acquired <- struct{}{}
 
 			time.Sleep(db.options.LeaseDuration)
 
-			db.logger.Debug().Str("lock", t.Name()).Int("client", client).Msg("client releasing lock")
+			db.logger.Debug().Str("lock", t.Name()).Msg("client releasing lock")
 			err = l.Release()
 			require.NoError(t, err)
 		}
@@ -224,16 +320,16 @@ func testFlakyConnection(numClients int, DBs []*DBLock) func(t *testing.T) {
 
 		flakyAcquire := func(client int, db *DBLock) {
 			l := db.Lock(t.Name())
-			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client acquiring lock")
+			db.logger.Debug().Str("lock", l.ID()).Msg("flaky client acquiring lock")
 			err := db.Acquire(l)
 			require.NoError(t, err)
-			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client acquired lock")
+			db.logger.Debug().Str("lock", l.ID()).Msg("flaky client acquired lock")
 
 			flakyAcquired <- struct{}{}
 
 			time.Sleep(db.options.LeaseDuration)
 
-			db.logger.Debug().Str("lock", l.ID()).Int("client", client).Msg("flaky client releasing lock")
+			db.logger.Debug().Str("lock", l.ID()).Msg("flaky client releasing lock")
 
 			l.cancel()
 			l.wg.Wait()
