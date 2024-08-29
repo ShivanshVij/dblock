@@ -28,8 +28,10 @@ var (
 	ErrRunningMigrations = errors.New("failed running database migrations")
 	ErrClosingDatabase   = errors.New("failed closing connection to database")
 
-	ErrNotAcquired = errors.New("lock not acquired")
-	ErrNotReleased = errors.New("lock not released")
+	ErrNotAcquired  = errors.New("lock not acquired")
+	ErrNotReleased  = errors.New("lock not released")
+	ErrGettingOwner = errors.New("error getting owner")
+	ErrGettingLock  = errors.New("error getting lock")
 
 	ErrCreateTransaction = errors.New("cannot create transaction")
 	ErrCommitTransaction = errors.New("cannot commit transaction")
@@ -114,6 +116,15 @@ func (db *DBLock) Lock(id string) *Lock {
 	return newLock(db, id)
 }
 
+func (db *DBLock) Owner(id string) (string, error) {
+	var _l *ent.Lock
+	err := db.try(db.ctx, func() error { return db.tryOwner(_l, id) })
+	if err != nil {
+		return "", err
+	}
+	return _l.Owner, nil
+}
+
 func (db *DBLock) Acquire(l *Lock, failIfLocked ...bool) error {
 	var err error
 	for {
@@ -159,6 +170,15 @@ func (db *DBLock) tryAcquire(l *Lock) error {
 	l.wg.Add(1)
 	db.wg.Add(1)
 	go db.doLeaseRefresh(l)
+	return nil
+}
+
+func (db *DBLock) tryOwner(_l *ent.Lock, id string) error {
+	var _err error
+	_l, _err = db.getLock(db.ctx, nil, &Lock{id: id})
+	if _err != nil {
+		return db.serializeError(ErrGettingOwner, _err)
+	}
 	return nil
 }
 
@@ -324,7 +344,10 @@ func (db *DBLock) getLock(ctx context.Context, tx *ent.Tx, l *Lock) (_l *ent.Loc
 			_l, err = tx.Lock.Query().Where(lock.ID(l.id)).Only(ctx)
 		}
 	default:
-		return nil, ErrInvalidDBType
+		return nil, errors.Join(ErrGettingLock, ErrInvalidDBType)
+	}
+	if err != nil {
+		err = errors.Join(ErrGettingLock, err)
 	}
 	return
 }
