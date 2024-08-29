@@ -118,7 +118,7 @@ func (db *DBLock) Lock(id string) *Lock {
 
 func (db *DBLock) Owner(id string) (string, error) {
 	var _l *ent.Lock
-	err := db.try(db.ctx, func() error { return db.tryOwner(_l, id) })
+	err := db.try(db.ctx, func() error { return db.tryOwner(&_l, id) })
 	if err != nil {
 		return "", err
 	}
@@ -173,9 +173,9 @@ func (db *DBLock) tryAcquire(l *Lock) error {
 	return nil
 }
 
-func (db *DBLock) tryOwner(_l *ent.Lock, id string) error {
+func (db *DBLock) tryOwner(_l **ent.Lock, id string) error {
 	var _err error
-	_l, _err = db.getLock(db.ctx, nil, &Lock{id: id})
+	*_l, _err = db.getLock(db.ctx, nil, &Lock{id: id})
 	if _err != nil {
 		return db.serializeError(ErrGettingOwner, _err)
 	}
