@@ -56,7 +56,7 @@ UPDATE SET "` + lock.FieldVersion + `" = ?, "` + lock.FieldOwner + `" = ?
 WHERE ` + lock.Table + `."` + lock.FieldVersion + `" IS NULL OR ` + lock.Table + `."` + lock.FieldVersion + `" = ?`
 
 type DBLock struct {
-	logger  types.SubLogger
+	logger  types.Logger
 	options *Options
 
 	sql *ent.Client

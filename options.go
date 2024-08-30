@@ -27,7 +27,7 @@ const (
 )
 
 type Options struct {
-	Logger                types.SubLogger
+	Logger                types.Logger
 	Owner                 string
 	DBType                DBType
 	DatabaseURL           string
