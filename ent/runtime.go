@@ -12,10 +12,13 @@ import (
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	lockMixin := schema.Lock{}.Mixin()
+	lockMixinFields0 := lockMixin[0].Fields()
+	_ = lockMixinFields0
 	lockFields := schema.Lock{}.Fields()
 	_ = lockFields
 	// lockDescVersion is the schema descriptor for version field.
-	lockDescVersion := lockFields[1].Descriptor()
+	lockDescVersion := lockMixinFields0[1].Descriptor()
 	// lock.DefaultVersion holds the default value on creation for the version field.
 	lock.DefaultVersion = lockDescVersion.Default.(func() uuid.UUID)
 }
