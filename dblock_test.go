@@ -257,10 +257,10 @@ func testReleaseWithoutAcquire(DBs [2]*DBLock) func(t *testing.T) {
 		locks[1].version = locks[0].version
 
 		err = locks[1].Release()
-		require.ErrorIs(t, err, ErrLockAlreadyReleased)
+		assert.ErrorIs(t, err, ErrLockAlreadyReleased)
 
 		err = locks[0].Release()
-		require.NoError(t, err)
+		assert.NoError(t, err)
 	}
 }
 
