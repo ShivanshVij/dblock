@@ -148,7 +148,14 @@ func (db *DBLock) Acquire(l *Lock, failIfLocked ...bool) error {
 }
 
 func (db *DBLock) Release(l *Lock) error {
+	l.mu.Lock()
 	l.cancel()
+	if !l.acquired {
+		l.mu.Unlock()
+		db.logger.Warn().Str("lock", l.id).Msg("lock already released")
+		return ErrLockAlreadyReleased
+	}
+	l.mu.Unlock()
 	l.wg.Wait()
 	err := db.try(db.ctx, func() error { return db.storeRelease(l) })
 	return err
@@ -203,6 +210,9 @@ func (db *DBLock) doLeaseRefresh(l *Lock) {
 }
 
 func (db *DBLock) storeAcquire(l *Lock) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	ctx, cancel := context.WithTimeout(l.ctx, db.options.LeaseDuration)
 	defer cancel()
 
@@ -241,12 +251,14 @@ func (db *DBLock) storeAcquire(l *Lock) error {
 		return db.serializeError(ErrCommitTransaction, err)
 	}
 	l.version = version
+	l.acquired = true
 	return nil
 }
 
 func (db *DBLock) storeRelease(l *Lock) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
 	ctx, cancel := context.WithTimeout(db.ctx, db.options.LeaseDuration)
 	defer cancel()
 	tx, err := db.sql.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
@@ -263,7 +275,7 @@ func (db *DBLock) storeRelease(l *Lock) error {
 		return db.serializeError(ErrNotReleased, err)
 	}
 	if affected == 0 {
-		l.isReleased = true
+		l.acquired = false
 		l.closeNotify()
 		_ = tx.Rollback()
 		return ErrLockAlreadyReleased
@@ -279,7 +291,7 @@ func (db *DBLock) storeRelease(l *Lock) error {
 	if err = tx.Commit(); err != nil {
 		return db.serializeError(ErrCommitTransaction, err)
 	}
-	l.isReleased = true
+	l.acquired = false
 	l.cancel()
 	l.closeNotify()
 	return nil
@@ -319,12 +331,12 @@ func (db *DBLock) storeLease(l *Lock) error {
 func (db *DBLock) leaseRefresh(l *Lock) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.isReleased {
+	if !l.acquired {
 		return ErrLockAlreadyReleased
 	}
 	err := db.try(l.ctx, func() error { return db.storeLease(l) })
 	if err != nil {
-		l.isReleased = true
+		l.acquired = false
 		l.closeNotify()
 		return errors.Join(ErrRefreshLease, err)
 	}

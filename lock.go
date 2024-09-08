@@ -29,7 +29,7 @@ type Lock struct {
 
 	version uuid.UUID
 
-	isReleased bool
+	acquired bool
 }
 
 func newLock(db *DBLock, id string) *Lock {
@@ -65,10 +65,10 @@ func (l *Lock) closeNotify() {
 	}
 }
 
-func (l *Lock) IsReleased() bool {
+func (l *Lock) Acquired() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.isReleased
+	return l.acquired
 }
 
 func (l *Lock) Version() uuid.UUID {
