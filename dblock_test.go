@@ -256,9 +256,11 @@ func testReleaseWithoutAcquire(DBs [2]*DBLock) func(t *testing.T) {
 
 		require.True(t, locks[0].Acquired())
 		require.False(t, locks[1].Acquired())
-		DBs[0].logger.Debug().Str("lock", t.Name()).Str("version", locks[0].version.String()).Msg("client acquired lock")
 
+		locks[0].mu.Lock()
+		DBs[0].logger.Debug().Str("lock", t.Name()).Str("version", locks[0].version.String()).Msg("client acquired lock")
 		locks[1].version = locks[0].version
+		locks[0].mu.Unlock()
 
 		DBs[1].logger.Debug().Str("lock", t.Name()).Msg("client releasing lock")
 		err = locks[1].Release()
