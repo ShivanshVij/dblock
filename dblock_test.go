@@ -245,6 +245,81 @@ func TestReleaseBeforeAcquire(t *testing.T) {
 	t.Run("sqlite", testReleaseBeforeAcquire(sqliteDBs))
 }
 
+func testReleaseWithoutAcquire(DBs [2]*DBLock) func(t *testing.T) {
+	return func(t *testing.T) {
+		started := make(chan struct{})
+
+		acquired := make(chan struct{})
+		release := make(chan struct{})
+
+		acquire := func(l *Lock, db *DBLock) {
+			db.logger.Debug().Str("lock", t.Name()).Msg("client acquiring lock")
+			started <- struct{}{}
+			err := db.Acquire(l)
+			require.NoError(t, err)
+			db.logger.Debug().Str("lock", t.Name()).Msg("client acquired lock")
+
+			acquired <- struct{}{}
+			<-release
+
+			db.logger.Debug().Str("lock", t.Name()).Msg("client releasing lock")
+			err = l.Release()
+			require.NoError(t, err)
+		}
+
+		var locks [2]*Lock
+		locks[0] = DBs[0].Lock(t.Name())
+		locks[1] = DBs[1].Lock(t.Name())
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			acquire(locks[0], DBs[0])
+		}()
+
+		select {
+		case <-started:
+		case <-time.After(leaseDuration):
+			t.Fatal("timed out waiting for initial lock goroutine to start")
+		}
+
+		select {
+		case <-acquired:
+		case <-time.After(leaseDuration):
+			t.Fatal("timed out waiting for initial lock acquisition")
+		}
+
+		time.Sleep(leaseDuration)
+
+		DBs[1].logger.Debug().Str("lock", t.Name()).Msg("client releasing lock without acquiring")
+		err := locks[1].Release()
+		require.ErrorIs(t, err, ErrLockAlreadyReleased)
+
+		release <- struct{}{}
+
+		wg.Wait()
+	}
+}
+
+func TestReleaseWithoutAcquire(t *testing.T) {
+	var pgContainer *postgres.PostgresContainer
+	pgDBs := [2]*DBLock{}
+	pgDBs[0], pgContainer = setupPostgres(t, nil, "client-0")
+	t.Cleanup(func() { require.NoError(t, pgDBs[0].Stop()) })
+	pgDBs[1], _ = setupPostgres(t, pgContainer, "client-1")
+	t.Cleanup(func() { require.NoError(t, pgDBs[1].Stop()) })
+	t.Run("postgres", testReleaseWithoutAcquire(pgDBs))
+
+	var sqliteConnStr string
+	sqliteDBs := [2]*DBLock{}
+	sqliteDBs[0], sqliteConnStr = setupSQLite(t, "", "client-0")
+	t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
+	sqliteDBs[1], _ = setupSQLite(t, sqliteConnStr, "client-1")
+	t.Cleanup(func() { require.NoError(t, sqliteDBs[1].Stop()) })
+	t.Run("sqlite", testReleaseBeforeAcquire(sqliteDBs))
+}
+
 func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
 	return func(t *testing.T) {
 		require.Equal(t, numClients, len(DBs))
