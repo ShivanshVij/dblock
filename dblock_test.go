@@ -254,11 +254,19 @@ func testReleaseWithoutAcquire(DBs [2]*DBLock) func(t *testing.T) {
 		err := locks[0].Acquire()
 		require.NoError(t, err)
 
+		require.True(t, locks[0].Acquired())
+		require.False(t, locks[1].Acquired())
+		DBs[0].logger.Debug().Str("lock", t.Name()).Str("version", locks[0].version.String()).Msg("client acquired lock")
+
 		locks[1].version = locks[0].version
 
+		DBs[1].logger.Debug().Str("lock", t.Name()).Msg("client releasing lock")
 		err = locks[1].Release()
 		assert.ErrorIs(t, err, ErrLockAlreadyReleased)
+		assert.True(t, locks[0].Acquired())
 
+		DBs[0].logger.Debug().Str("lock", t.Name()).Msg("client releasing lock")
+		assert.True(t, locks[0].Acquired())
 		err = locks[0].Release()
 		assert.NoError(t, err)
 	}
@@ -279,7 +287,7 @@ func TestReleaseWithoutAcquire(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, sqliteDBs[0].Stop()) })
 	sqliteDBs[1], _ = setupSQLite(t, sqliteConnStr, "client-1")
 	t.Cleanup(func() { require.NoError(t, sqliteDBs[1].Stop()) })
-	t.Run("sqlite", testReleaseBeforeAcquire(sqliteDBs))
+	t.Run("sqlite", testReleaseWithoutAcquire(sqliteDBs))
 }
 
 func testContention(numClients int, DBs []*DBLock) func(t *testing.T) {
