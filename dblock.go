@@ -133,6 +133,8 @@ func (db *DBLock) Acquire(l *Lock, failIfLocked ...bool) error {
 		}
 		err = db.try(l.ctx, func() error { return db.tryAcquire(l) })
 		switch {
+		case errors.Is(err, context.Canceled):
+			return ErrNotAcquired
 		case len(failIfLocked) > 0 && failIfLocked[0] && errors.Is(err, ErrNotAcquired):
 			return err
 		case errors.Is(err, ErrNotAcquired):

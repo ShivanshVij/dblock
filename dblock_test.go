@@ -247,58 +247,20 @@ func TestReleaseBeforeAcquire(t *testing.T) {
 
 func testReleaseWithoutAcquire(DBs [2]*DBLock) func(t *testing.T) {
 	return func(t *testing.T) {
-		started := make(chan struct{})
-
-		acquired := make(chan struct{})
-		release := make(chan struct{})
-
-		acquire := func(l *Lock, db *DBLock) {
-			db.logger.Debug().Str("lock", t.Name()).Msg("client acquiring lock")
-			started <- struct{}{}
-			err := db.Acquire(l)
-			require.NoError(t, err)
-			db.logger.Debug().Str("lock", t.Name()).Msg("client acquired lock")
-
-			acquired <- struct{}{}
-			<-release
-
-			db.logger.Debug().Str("lock", t.Name()).Msg("client releasing lock")
-			err = l.Release()
-			require.NoError(t, err)
-		}
-
 		var locks [2]*Lock
 		locks[0] = DBs[0].Lock(t.Name())
 		locks[1] = DBs[1].Lock(t.Name())
 
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			acquire(locks[0], DBs[0])
-		}()
+		err := locks[0].Acquire()
+		require.NoError(t, err)
 
-		select {
-		case <-started:
-		case <-time.After(leaseDuration):
-			t.Fatal("timed out waiting for initial lock goroutine to start")
-		}
+		locks[1].version = locks[0].version
 
-		select {
-		case <-acquired:
-		case <-time.After(leaseDuration):
-			t.Fatal("timed out waiting for initial lock acquisition")
-		}
-
-		time.Sleep(leaseDuration)
-
-		DBs[1].logger.Debug().Str("lock", t.Name()).Msg("client releasing lock without acquiring")
-		err := locks[1].Release()
+		err = locks[1].Release()
 		require.ErrorIs(t, err, ErrLockAlreadyReleased)
 
-		release <- struct{}{}
-
-		wg.Wait()
+		err = locks[0].Release()
+		require.NoError(t, err)
 	}
 }
 
