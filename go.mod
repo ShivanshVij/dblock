@@ -6,7 +6,7 @@ require (
 	entgo.io/ent v0.14.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.0
-	github.com/loopholelabs/logging v0.3.0
+	github.com/loopholelabs/logging v0.3.1
 	github.com/mattn/go-sqlite3 v1.14.23
 	github.com/stretchr/testify v1.9.0
 	github.com/testcontainers/testcontainers-go v0.33.0
